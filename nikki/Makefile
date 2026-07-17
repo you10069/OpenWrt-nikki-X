@@ -1,20 +1,29 @@
 include $(TOPDIR)/rules.mk
 
 PKG_NAME:=nikki
-PKG_VERSION:=2026.04.08
+PKG_VERSION:=2026.04.08.legacy1
 PKG_RELEASE:=1
+PKGARCH:=all
 
-PKG_LICENSE:=GPL3.0+
-PKG_MAINTAINER:=Joseph Mory <morytyann@gmail.com>
+PKG_LICENSE:=GPL-3.0-or-later
+PKG_MAINTAINER:=Nikki Legacy contributors
 
 include $(INCLUDE_DIR)/package.mk
 
 define Package/nikki
   SECTION:=net
   CATEGORY:=Network
-  TITLE:=Transparent Proxy with Mihomo on OpenWrt.
-  URL:=https://github.com/nikkinikki-org
-  DEPENDS:=+ca-bundle +curl +yq firewall4 +ip-full +kmod-inet-diag +kmod-nft-socket +kmod-nft-tproxy +kmod-tun +kmod-dummy +mihomo
+  TITLE:=Nikki legacy transparent proxy for firewall3/iptables
+  URL:=https://github.com/nikkinikki-org/OpenWrt-nikki
+  DEPENDS:=+ca-bundle +curl +yq +firewall +iptables +ipset +ip-full \
+    +iptables-mod-tproxy +iptables-mod-extra +iptables-mod-ipopt \
+    +kmod-ipt-ipset +kmod-tun +mihomo
+endef
+
+define Package/nikki/description
+  A firewall3/iptables-oriented Nikki fork for OpenWrt 21.02-class systems.
+  The initial backend supports IPv4 TCP REDIRECT, UDP TPROXY, DNS hijacking,
+  router/LAN access control and ipset-based bypass rules without ucode.
 endef
 
 define Package/nikki/conffiles
@@ -24,9 +33,8 @@ endef
 
 define Package/nikki/install
 	$(INSTALL_DIR) $(1)/etc/nikki
-	$(INSTALL_DIR) $(1)/etc/nikki/ucode
 	$(INSTALL_DIR) $(1)/etc/nikki/scripts
-	$(INSTALL_DIR) $(1)/etc/nikki/nftables
+	$(INSTALL_DIR) $(1)/etc/nikki/ipset
 	$(INSTALL_DIR) $(1)/etc/nikki/profiles
 	$(INSTALL_DIR) $(1)/etc/nikki/subscriptions
 	$(INSTALL_DIR) $(1)/etc/nikki/run
@@ -35,17 +43,13 @@ define Package/nikki/install
 	$(INSTALL_DIR) $(1)/etc/nikki/run/providers/proxy
 
 	$(INSTALL_DATA) $(CURDIR)/files/mixin.yaml $(1)/etc/nikki/mixin.yaml
-
-	$(INSTALL_BIN) $(CURDIR)/files/ucode/include.uc $(1)/etc/nikki/ucode/include.uc
-	$(INSTALL_BIN) $(CURDIR)/files/ucode/mixin.uc $(1)/etc/nikki/ucode/mixin.uc
-	$(INSTALL_BIN) $(CURDIR)/files/ucode/hijack.ut $(1)/etc/nikki/ucode/hijack.ut
+	$(INSTALL_DATA) $(CURDIR)/files/ipset/geoip_cn.txt $(1)/etc/nikki/ipset/geoip_cn.txt
 
 	$(INSTALL_BIN) $(CURDIR)/files/scripts/include.sh $(1)/etc/nikki/scripts/include.sh
+	$(INSTALL_BIN) $(CURDIR)/files/scripts/mixin.sh $(1)/etc/nikki/scripts/mixin.sh
+	$(INSTALL_BIN) $(CURDIR)/files/scripts/firewall_fw3.sh $(1)/etc/nikki/scripts/firewall_fw3.sh
 	$(INSTALL_BIN) $(CURDIR)/files/scripts/firewall_include.sh $(1)/etc/nikki/scripts/firewall_include.sh
 	$(INSTALL_BIN) $(CURDIR)/files/scripts/debug.sh $(1)/etc/nikki/scripts/debug.sh
-
-	$(INSTALL_BIN) $(CURDIR)/files/nftables/geoip_cn.nft $(1)/etc/nikki/nftables/geoip_cn.nft
-	$(INSTALL_BIN) $(CURDIR)/files/nftables/geoip6_cn.nft $(1)/etc/nikki/nftables/geoip6_cn.nft
 
 	$(INSTALL_DIR) $(1)/etc/config
 	$(INSTALL_CONF) $(CURDIR)/files/nikki.conf $(1)/etc/config/nikki
@@ -62,18 +66,25 @@ define Package/nikki/install
 	$(INSTALL_DATA) $(CURDIR)/files/nikki.upgrade $(1)/lib/upgrade/keep.d/nikki
 endef
 
+define Package/nikki/prerm
+#!/bin/sh
+if [ -z "$${IPKG_INSTROOT}" ]; then
+	[ -x /etc/init.d/nikki ] && /etc/init.d/nikki stop >/dev/null 2>&1
+	[ -x /etc/nikki/scripts/firewall_fw3.sh ] && /etc/nikki/scripts/firewall_fw3.sh remove >/dev/null 2>&1
+fi
+endef
+
 define Package/nikki/postrm
 #!/bin/sh
-if [ -z $${IPKG_INSTROOT} ]; then
-	uci -q batch <<-EOF > /dev/null
-		del firewall.nikki
+if [ -z "$${IPKG_INSTROOT}" ]; then
+	uci -q batch <<-EOF_UCI >/dev/null
+		delete firewall.nikki
 		commit firewall
-	EOF
+	EOF_UCI
 fi
 endef
 
 define Build/Compile
-
 endef
 
 $(eval $(call BuildPackage,nikki))

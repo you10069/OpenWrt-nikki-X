@@ -1118,3 +1118,9 @@ msgstr ""
 #: applications/luci-app-nikki/htdocs/luci-static/resources/view/nikki/app.js:128
 msgid "procd Config"
 msgstr ""
+
+msgid "Legacy Backend"
+msgstr ""
+
+msgid "IPv4: TCP Redirect + UDP TPROXY (firewall3/iptables)"
+msgstr ""

@@ -1,11 +1,10 @@
 {
     "luci-app-nikki": {
-        "description": "Grant access to nikki procedures",
+        "description": "Grant access to Nikki legacy procedures",
         "read": {
             "uci": [ "nikki" ],
             "ubus": {
-                "rc": [ "*" ],
-                "luci.nikki": [ "*" ]
+                "rc": [ "*" ]
             },
             "file": {
                 "/etc/nikki/profiles/*.yaml": ["read"],
@@ -22,6 +21,7 @@
         "write": {
             "uci": [ "nikki" ],
             "file": {
+                "/usr/libexec/nikki-rpc": ["exec"],
                 "/etc/nikki/profiles/*.yaml": ["write"],
                 "/etc/nikki/profiles/*.yml": ["write"],
                 "/etc/nikki/subscriptions/*.yaml": ["write"],

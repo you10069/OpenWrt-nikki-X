@@ -1,0 +1,181 @@
+#!/bin/sh
+
+# Small, fixed-command LuCI helper for OpenWrt 21.02. It replaces the modern
+# rpcd-ucode object while preserving a narrow and auditable privilege surface.
+
+. /usr/share/libubox/jshn.sh
+
+HOME_DIR="/etc/nikki"
+RUN_PROFILE="$HOME_DIR/run/config.yaml"
+TMP_DIR="/var/run/nikki"
+DEBUG_LOG="/var/log/nikki/debug.log"
+
+json_success() {
+	json_init
+	json_add_boolean success 1
+	json_dump
+}
+
+json_failure() {
+	json_init
+	json_add_boolean success 0
+	[ -n "$1" ] && json_add_string error "$1"
+	json_dump
+}
+
+valid_section_id() {
+	case "$1" in
+		""|*[!A-Za-z0-9_]* ) return 1 ;;
+		*) return 0 ;;
+	esac
+}
+
+allowed_write_path() {
+	case "$1" in
+		*'/../'*|*'/..'|*'../'*) return 1 ;;
+		/etc/nikki/profiles/*.yaml|/etc/nikki/profiles/*.yml|\
+		/etc/nikki/subscriptions/*.yaml|/etc/nikki/subscriptions/*.yml|\
+		/etc/nikki/mixin.yaml|/etc/nikki/run/config.yaml|\
+		/etc/nikki/run/providers/rule/*|/etc/nikki/run/providers/proxy/*|\
+		/var/log/nikki/*.log) return 0 ;;
+		*) return 1 ;;
+	esac
+}
+
+version() {
+	local app="" core=""
+	if command -v opkg >/dev/null 2>&1; then
+		app="$(opkg list-installed luci-app-nikki 2>/dev/null | awk '{print $3; exit}')"
+	fi
+	if command -v mihomo >/dev/null 2>&1; then
+		core="$(mihomo -v 2>/dev/null | awk '/Mihomo/ {print $3; exit}')"
+	fi
+	json_init
+	json_add_string app "$app"
+	json_add_string core "$core"
+	json_dump
+}
+
+profile() {
+	local defaults="${1:-{}}" defaults_file="$TMP_DIR/profile-defaults.$$"
+	mkdir -p "$TMP_DIR"
+	[ -r "$RUN_PROFILE" ] || { printf '{}\n'; return 0; }
+	trap 'rm -f "$defaults_file"' EXIT INT TERM
+	printf '%s' "$defaults" > "$defaults_file"
+	if ! yq -M -p json -o json -e '.' "$defaults_file" >/dev/null 2>&1; then
+		printf '{}\n'
+		rm -f "$defaults_file"
+		trap - EXIT INT TERM
+		return 0
+	fi
+	yq -M -p yaml -o json eval-all 'select(fi == 0) *? select(fi == 1)' "$defaults_file" "$RUN_PROFILE" 2>/dev/null || printf '{}\n'
+	rm -f "$defaults_file"
+	trap - EXIT INT TERM
+}
+
+update_subscription() {
+	local section="$1"
+	valid_section_id "$section" || { json_failure "invalid section id"; return 1; }
+	if /etc/init.d/nikki update_subscription "$section" >/dev/null 2>&1; then
+		json_success
+	else
+		json_failure "subscription update failed"
+		return 1
+	fi
+}
+
+api() {
+	local method="${1:-GET}" path="${2:-/}" query="${3:-}" body="${4:-}"
+	local api_listen api_tls_listen secret protocol listen url output
+	[ -r "$RUN_PROFILE" ] || { printf '{}\n'; return 0; }
+
+	api_listen="$(yq -M -r '."external-controller" // ""' "$RUN_PROFILE" 2>/dev/null)"
+	api_tls_listen="$(yq -M -r '."external-controller-tls" // ""' "$RUN_PROFILE" 2>/dev/null)"
+	secret="$(yq -M -r '.secret // ""' "$RUN_PROFILE" 2>/dev/null)"
+	if [ -n "$api_tls_listen" ]; then
+		protocol=https
+		listen="$api_tls_listen"
+	else
+		protocol=http
+		listen="$api_listen"
+	fi
+	[ -n "$listen" ] || { printf '{}\n'; return 0; }
+	case "$method" in GET|POST|PUT|PATCH|DELETE) ;; *) printf '{}\n'; return 0 ;; esac
+	case "$path" in /*) ;; *) printf '{}\n'; return 0 ;; esac
+
+	# A wildcard bind address is valid for Mihomo but not a useful client
+	# destination. Contact the local controller through loopback instead.
+	case "$listen" in
+		0.0.0.0:*) listen="127.0.0.1:${listen##*:}" ;;
+		\[::\]:*) listen="127.0.0.1:${listen##*:}" ;;
+	esac
+	case "$listen" in
+		http://0.0.0.0:*) listen="http://127.0.0.1:${listen##*:}" ;;
+		https://0.0.0.0:*) listen="https://127.0.0.1:${listen##*:}" ;;
+	esac
+
+	case "$listen" in
+		http://*|https://*) url="${listen}${path}" ;;
+		*) url="${protocol}://${listen}${path}" ;;
+	esac
+	[ -z "$query" ] || url="${url}?${query}"
+
+	set -- curl -sS --insecure --request "$method" --connect-timeout 5 --max-time 30
+	[ -z "$secret" ] || set -- "$@" --oauth2-bearer "$secret"
+	[ -z "$body" ] || set -- "$@" --header 'Content-Type: application/json' --data "$body"
+	set -- "$@" "$url"
+	output="$("$@" 2>/dev/null)" || output='{}'
+	printf '%s' "$output" | yq -M -p json -o json -e '.' 2>/dev/null || printf '{}\n'
+}
+
+identifiers() {
+	json_init
+	json_add_array users
+	for item in $(awk -F: 'NF >= 3 && $1 != "" {print $1}' /etc/passwd 2>/dev/null); do
+		json_add_string "" "$item"
+	done
+	json_close_array
+	json_add_array groups
+	for item in $(awk -F: 'NF >= 3 && $1 != "" {print $1}' /etc/group 2>/dev/null); do
+		json_add_string "" "$item"
+	done
+	json_close_array
+	json_add_array cgroups
+	json_close_array
+	json_dump
+}
+
+debug() {
+	mkdir -p "$(dirname "$DEBUG_LOG")"
+	if /etc/nikki/scripts/debug.sh > "$DEBUG_LOG" 2>&1; then
+		json_success
+	else
+		json_failure "debug collection failed"
+		return 1
+	fi
+}
+
+write_file() {
+	local path="$1" data="$2" append="${3:-0}" mode="${4:-644}"
+	allowed_write_path "$path" || { json_failure "path is not allowed"; return 1; }
+	case "$mode" in ''|*[!0-7]*) mode=644 ;; esac
+	mkdir -p "$(dirname "$path")" || { json_failure "mkdir failed"; return 1; }
+	if [ "$append" = 1 ]; then
+		printf '%s' "$data" >> "$path" || { json_failure "write failed"; return 1; }
+	else
+		printf '%s' "$data" > "$path" || { json_failure "write failed"; return 1; }
+	fi
+	chmod "$mode" "$path" 2>/dev/null
+	json_success
+}
+
+case "$1" in
+	version) version ;;
+	profile) profile "$2" ;;
+	update-subscription) update_subscription "$2" ;;
+	api) api "$2" "$3" "$4" "$5" ;;
+	identifiers) identifiers ;;
+	debug) debug ;;
+	write-file) write_file "$2" "$3" "$4" "$5" ;;
+	*) json_failure "unknown action"; exit 2 ;;
+esac

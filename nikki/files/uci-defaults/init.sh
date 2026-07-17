@@ -3,7 +3,7 @@
 . "$IPKG_INSTROOT/etc/nikki/scripts/include.sh"
 
 # check nikki.config.init
-init=$(uci -q get nikki.config.init); [ -z "$init" ] && return
+init=$(uci -q get nikki.config.init); [ -z "$init" ] && exit 0
 
 # generate random string for api secret and authentication password
 random=$(awk 'BEGIN{srand(); printf "%06d", int(rand() * 1000000)}')

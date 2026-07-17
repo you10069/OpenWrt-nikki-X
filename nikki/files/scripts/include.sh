@@ -21,23 +21,17 @@ TEMP_DIR="/var/run/nikki"
 PID_FILE_PATH="$TEMP_DIR/nikki.pid"
 STARTED_FLAG_PATH="$TEMP_DIR/started.flag"
 BRIDGE_NF_CALL_IPTABLES_FLAG_PATH="$TEMP_DIR/bridge_nf_call_iptables.flag"
-BRIDGE_NF_CALL_IP6TABLES_FLAG_PATH="$TEMP_DIR/bridge_nf_call_ip6tables.flag"
-
-# ucode
-UCODE_DIR="$HOME_DIR/ucode"
-INCLUDE_UC="$UCODE_DIR/include.uc"
-MIXIN_UC="$UCODE_DIR/mixin.uc"
-HIJACK_UT="$UCODE_DIR/hijack.ut"
 
 # scripts
 SH_DIR="$HOME_DIR/scripts"
 INCLUDE_SH="$SH_DIR/include.sh"
+MIXIN_SH="$SH_DIR/mixin.sh"
+FIREWALL_FW3_SH="$SH_DIR/firewall_fw3.sh"
 FIREWALL_INCLUDE_SH="$SH_DIR/firewall_include.sh"
 
-# nftables
-NFT_DIR="$HOME_DIR/nftables"
-GEOIP_CN_NFT="$NFT_DIR/geoip_cn.nft"
-GEOIP6_CN_NFT="$NFT_DIR/geoip6_cn.nft"
+# ipset data
+IPSET_DIR="$HOME_DIR/ipset"
+GEOIP_CN_TXT="$IPSET_DIR/geoip_cn.txt"
 
 # functions
 format_filesize() {

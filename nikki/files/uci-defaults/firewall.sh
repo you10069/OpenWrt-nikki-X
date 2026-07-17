@@ -2,11 +2,14 @@
 
 . "$IPKG_INSTROOT/etc/nikki/scripts/include.sh"
 
-uci -q batch <<-EOF > /dev/null
-	del firewall.nikki
+# firewall3 script include: restore Nikki chains after every firewall reload.
+uci -q batch <<-EOF_UCI >/dev/null
+	delete firewall.nikki
 	set firewall.nikki=include
 	set firewall.nikki.type=script
 	set firewall.nikki.path=$FIREWALL_INCLUDE_SH
-	set firewall.nikki.fw4_compatible=1
+	set firewall.nikki.reload=1
 	commit firewall
-EOF
+EOF_UCI
+
+exit 0

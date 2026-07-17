@@ -1,68 +1,34 @@
 #!/bin/sh
 
-# Nikki's feed
+set -eu
 
-# check env
-if [[ ! -x "/bin/opkg" && ! -x "/usr/bin/apk" || ! -x "/sbin/fw4" ]]; then
-	echo "only supports OpenWrt build with firewall4!"
-	exit 1
+repo_dir=$(CDPATH= cd -- "$(dirname -- "$0")" && pwd)
+buildroot=${1:-}
+
+if [ -z "$buildroot" ] || [ ! -f "$buildroot/rules.mk" ] || [ ! -d "$buildroot/package" ]; then
+	echo "Usage: $0 /path/to/openwrt-buildroot" >&2
+	exit 2
 fi
 
-# include openwrt_release
-. /etc/openwrt_release
+buildroot=$(CDPATH= cd -- "$buildroot" && pwd)
+link_path="$buildroot/package/feeds/nikki-legacy"
+mkdir -p "$link_path"
 
-# get branch/arch
-arch="$DISTRIB_ARCH"
-branch=
-case "$DISTRIB_RELEASE" in
-	*"24.10"*)
-		branch="openwrt-24.10"
-		;;
-	*"25.12"*)
-		branch="openwrt-25.12"
-		;;
-	"SNAPSHOT")
-		branch="SNAPSHOT"
-		;;
-	*)
-		echo "unsupported release: $DISTRIB_RELEASE"
-		exit 1
-		;;
-esac
+# Link package directories individually. Linking the repository root itself as
+# one package confuses the OpenWrt package scanner because the root has no
+# package Makefile.
+for package in nikki luci-app-nikki mihomo-meta mihomo-alpha; do
+	rm -rf "$link_path/$package"
+	ln -s "$repo_dir/$package" "$link_path/$package"
+done
 
-# feed url
-repository_url="https://nikkinikki.pages.dev"
-feed_url="$repository_url/$branch/$arch/nikki"
+cat <<EOF_DONE
+Linked Nikki Legacy packages into:
+  $link_path
 
-if [ -x "/bin/opkg" ]; then
-	# add key
-	echo "add key"
-	key_build_pub_file="key-build.pub"
-	wget -O "$key_build_pub_file" "$repository_url/key-build.pub"
-	opkg-key add "$key_build_pub_file"
-	rm -f "$key_build_pub_file"
-	# add feed
-	echo "add feed"
-	if grep -q nikki /etc/opkg/customfeeds.conf; then
-		sed -i '/nikki/d' /etc/opkg/customfeeds.conf
-	fi
-	echo "src/gz nikki $feed_url" >> /etc/opkg/customfeeds.conf
-	# update feeds
-	echo "update feeds"
-	opkg update
-elif [ -x "/usr/bin/apk" ]; then
-	# add key
-	echo "add key"
-	wget -O "/etc/apk/keys/nikki.pem" "$repository_url/public-key.pem"
-	# add feed
-	echo "add feed"
-	if grep -q nikki /etc/apk/repositories.d/customfeeds.list; then
-		sed -i '/nikki/d' /etc/apk/repositories.d/customfeeds.list
-	fi
-	echo "$feed_url/packages.adb" >> /etc/apk/repositories.d/customfeeds.list
-	# update feeds
-	echo "update feeds"
-	apk update
-fi
-
-echo "success"
+Next steps:
+  cd $buildroot
+  ./scripts/feeds update -a
+  ./scripts/feeds install -a
+  make menuconfig
+EOF_DONE

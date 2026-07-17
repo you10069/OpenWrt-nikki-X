@@ -1125,3 +1125,9 @@ msgstr "用户名"
 #: applications/luci-app-nikki/htdocs/luci-static/resources/view/nikki/app.js:128
 msgid "procd Config"
 msgstr "procd 配置"
+
+msgid "Legacy Backend"
+msgstr "旧版后端"
+
+msgid "IPv4: TCP Redirect + UDP TPROXY (firewall3/iptables)"
+msgstr "IPv4：TCP 重定向 + UDP TPROXY（firewall3/iptables）"

@@ -19,50 +19,24 @@ const callRCInit = rpc.declare({
     expect: { '': {} }
 });
 
-const callFileWrite = rpc.declare({
-    object: 'file',
-    method: 'write',
-    params: ['path', 'data', 'append', 'mode']
-});
+const nikkiHelper = '/usr/libexec/nikki-rpc';
 
-const callNikkiVersion = rpc.declare({
-    object: 'luci.nikki',
-    method: 'version',
-    expect: { '': {} }
-});
+function callNikki(action, args) {
+    const params = [action].concat(args || []).map(function (value) {
+        return (value == null) ? '' : String(value);
+    });
 
-const callNikkiProfile = rpc.declare({
-    object: 'luci.nikki',
-    method: 'profile',
-    params: ['defaults'],
-    expect: { '': {} }
-});
+    return fs.exec(nikkiHelper, params).then(function (result) {
+        if (result.code !== 0)
+            throw new Error(result.stderr || result.stdout || _('Nikki helper failed'));
 
-const callNikkiUpdateSubscription = rpc.declare({
-    object: 'luci.nikki',
-    method: 'update_subscription',
-    params: ['section_id'],
-    expect: { '': {} }
-});
-
-const callNikkiAPI = rpc.declare({
-    object: 'luci.nikki',
-    method: 'api',
-    params: ['method', 'path', 'query', 'body'],
-    expect: { '': {} }
-});
-
-const callNikkiGetIdentifiers = rpc.declare({
-    object: 'luci.nikki',
-    method: 'get_identifiers',
-    expect: { '': {} }
-});
-
-const callNikkiDebug = rpc.declare({
-    object: 'luci.nikki',
-    method: 'debug',
-    expect: { '': {} }
-});
+        try {
+            return JSON.parse(result.stdout || '{}');
+        } catch (e) {
+            throw new Error(_('Invalid response from Nikki helper'));
+        }
+    });
+}
 
 const homeDir = '/etc/nikki';
 const profilesDir = `${homeDir}/profiles`;
@@ -77,7 +51,6 @@ const logDir = `/var/log/nikki`;
 const appLogPath = `${logDir}/app.log`;
 const coreLogPath = `${logDir}/core.log`;
 const debugLogPath = `${logDir}/debug.log`;
-const nftDir = `${homeDir}/nftables`;
 
 return baseclass.extend({
     homeDir: homeDir,
@@ -106,47 +79,43 @@ return baseclass.extend({
 
     writefile: function (path, data, mode) {
         data = (data != null) ? String(data) : '';
-        mode = (mode != null) ? mode : 0o644;
+        mode = (mode != null) ? Number(mode).toString(8) : '644';
 
-        const encoder = new TextEncoder();
-        const decoder = new TextDecoder();
+        // OpenWrt 21.02 file.write has no append argument. Send bounded chunks
+        // to the fixed helper instead, which validates every destination path.
         const chunkSize = 8 * 1024;
-
-        const bytes = encoder.encode(data);
-
-        if (bytes.length <= chunkSize) {
-            return callFileWrite(path, data, false, mode);
-        }
+        if (data.length <= chunkSize)
+            return callNikki('write-file', [path, data, '0', mode]);
 
         let promise = Promise.resolve();
-        for(let offset = 0; offset < bytes.length; offset += chunkSize) {
-            const chunkBytes = bytes.slice(offset, Math.min(offset + chunkSize, bytes.length));
-            const chunk = decoder.decode(chunkBytes);
-            const append = offset > 0;
-            promise = promise.then(() => callFileWrite(path, chunk, append, mode));
+        for (let offset = 0; offset < data.length; offset += chunkSize) {
+            const chunk = data.slice(offset, Math.min(offset + chunkSize, data.length));
+            const append = offset > 0 ? '1' : '0';
+            promise = promise.then(function () {
+                return callNikki('write-file', [path, chunk, append, mode]);
+            });
         }
-
         return promise;
     },
 
     version: function () {
-        return callNikkiVersion();
+        return callNikki('version');
     },
 
     profile: function (defaults) {
-        return callNikkiProfile(defaults);
+        return callNikki('profile', [JSON.stringify(defaults || {})]);
     },
 
     updateSubscription: function (section_id) {
-        return callNikkiUpdateSubscription(section_id);
+        return callNikki('update-subscription', [section_id]);
     },
 
     updateDashboard: function () {
-        return callNikkiAPI('POST', '/upgrade/ui');
+        return callNikki('api', ['POST', '/upgrade/ui', '', '']);
     },
 
     openDashboard: async function () {
-        const profile = await callNikkiProfile({
+        const profile = await this.profile({
             'external-ui-name': null,
             'external-controller': null,
             'external-controller-tls': null,
@@ -190,7 +159,7 @@ return baseclass.extend({
     },
 
     getIdentifiers: function () {
-        return callNikkiGetIdentifiers();
+        return callNikki('identifiers');
     },
 
     listProfiles: function () {
@@ -222,6 +191,6 @@ return baseclass.extend({
     },
 
     debug: function () {
-        return callNikkiDebug();
+        return callNikki('debug');
     },
 })
