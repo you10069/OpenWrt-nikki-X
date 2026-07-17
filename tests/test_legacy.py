@@ -64,7 +64,7 @@ done
 case "$expr" in
   redir) echo 7891 ;;
   tproxy) echo 7892 ;;
-  dns) echo '0.0.0.0:1053' ;;
+  dns) echo '[::]:1053' ;;
   *) echo '{}' ;;
 esac
 """,
@@ -83,7 +83,7 @@ config_get() {
         mixin.mode) _mock_value=rule ;;
         mixin.match_process) _mock_value=off ;;
         mixin.outbound_interface) _mock_value=wan ;;
-        mixin.ipv6) _mock_value=0 ;;
+        mixin.ipv6) _mock_value=1 ;;
         mixin.allow_lan) _mock_value=1 ;;
         mixin.mixed_port) _mock_value=7890 ;;
         mixin.redir_port) _mock_value=7891 ;;
@@ -93,8 +93,8 @@ config_get() {
         mixin.tun_device) _mock_value=nikki ;;
         mixin.tun_stack) _mock_value=mixed ;;
         mixin.dns_enabled) _mock_value=1 ;;
-        mixin.dns_listen) _mock_value=0.0.0.0:1053 ;;
-        mixin.dns_ipv6) _mock_value=0 ;;
+        mixin.dns_listen) _mock_value="[::]:1053" ;;
+        mixin.dns_ipv6) _mock_value=1 ;;
         mixin.dns_mode) _mock_value=fake-ip ;;
         mixin.fake_ip_range) _mock_value=198.18.0.1/16 ;;
         mixin.dns_nameserver) _mock_value=1 ;;
@@ -120,9 +120,12 @@ config_get() {
         proxy.udp_mode) _mock_value=tproxy ;;
         proxy.ipv4_proxy) _mock_value=1 ;;
         proxy.ipv4_dns_hijack) _mock_value=1 ;;
+        proxy.ipv6_proxy) _mock_value=1 ;;
+        proxy.ipv6_dns_hijack) _mock_value=1 ;;
         proxy.router_proxy) _mock_value=1 ;;
         proxy.lan_proxy) _mock_value=1 ;;
         proxy.bypass_china_mainland_ip) _mock_value=1 ;;
+        proxy.bypass_china_mainland_ip6) _mock_value=1 ;;
         proxy.proxy_tcp_dport) _mock_value='80 443 8000-8010' ;;
         proxy.proxy_udp_dport) _mock_value='53 123 443' ;;
         auth0.enabled) _mock_value=1 ;;
@@ -153,6 +156,12 @@ config_get() {
         rac_default.enabled) _mock_value=1 ;;
         rac_default.dns) _mock_value=1 ;;
         rac_default.proxy) _mock_value=1 ;;
+        lac_ip4.enabled) _mock_value=1 ;;
+        lac_ip4.dns) _mock_value=0 ;;
+        lac_ip4.proxy) _mock_value=0 ;;
+        lac_ip6.enabled) _mock_value=1 ;;
+        lac_ip6.dns) _mock_value=1 ;;
+        lac_ip6.proxy) _mock_value=1 ;;
         lac_mac.enabled) _mock_value=1 ;;
         lac_mac.dns) _mock_value=0 ;;
         lac_mac.proxy) _mock_value=0 ;;
@@ -174,6 +183,7 @@ config_list_foreach() {
     case "$section.$option" in
         proxy.lan_inbound_interface) values='lan' ;;
         proxy.reserved_ip) values='0.0.0.0/8 10.0.0.0/8 127.0.0.0/8 192.168.0.0/16' ;;
+        proxy.reserved_ip6) values='::/128 ::1/128 fc00::/7 fe80::/10 ff00::/8' ;;
         proxy.bypass_dscp) values='4' ;;
         proxy.bypass_fwmark) values='0x99/0xFF' ;;
         auth0.*) values='' ;;
@@ -183,6 +193,8 @@ config_list_foreach() {
         rac_root.user) values='root' ;;
         rac_root.group) values='root' ;;
         rac_default.*) values='' ;;
+        lac_ip4.ip) values='192.0.2.10' ;;
+        lac_ip6.ip6) values='2001:db8::10' ;;
         lac_mac.mac) values='AA:BB:CC:DD:EE:FF' ;;
         lac_default.*) values='' ;;
     esac
@@ -200,7 +212,7 @@ config_foreach() {
         rule_provider) sections='rp0' ;;
         rule) sections='rule0' ;;
         router_access_control) sections='rac_root rac_default' ;;
-        lan_access_control) sections='lac_mac lac_default' ;;
+        lan_access_control) sections='lac_ip4 lac_ip6 lac_mac lac_default' ;;
         *) sections='' ;;
     esac
     for section in $sections; do "$callback" "$section" "$extra1" "$extra2"; done
@@ -288,7 +300,9 @@ def test_mixin(tmp: Path, common: dict) -> None:
     assert data["redir-port"] == 7891
     assert data["tproxy-port"] == 7892
     assert data["routing-mark"] == 0x82
-    assert data["dns"]["listen"] == "0.0.0.0:1053"
+    assert data["dns"]["listen"] == "[::]:1053"
+    assert data["ipv6"] is True
+    assert data["dns"]["ipv6"] is True
     assert data["authentication"] == ["nikki:secret"]
     assert data["dns"]["default-nameserver"] == ["223.5.5.5", "223.6.6.6"]
     assert data["sniffer"]["sniff"]["HTTP"]["port"] == ["80", "8080"]
@@ -325,11 +339,19 @@ log() {{ printf '[%s] %s\\n' "$1" "$2" >> "$APP_LOG_PATH"; }}
         "NIK_MGL_PRE_CTRL_V4",
         "NIK_MGL_PRE_TPROXY_V4",
         "NIK_MGL_OUT_MARK_V4",
+        "NIK_NAT_PRE_DNS_V6",
+        "NIK_NAT_PRE_TCP_V6",
+        "NIK_NAT_OUT_DNS_V6",
+        "NIK_NAT_OUT_TCP_V6",
+        "NIK_MGL_PRE_CTRL_V6",
+        "NIK_MGL_PRE_TPROXY_V6",
+        "NIK_MGL_OUT_MARK_V6",
     ]
     for chain in expected:
         assert chain in rules
         assert len(chain) <= 28
     assert rules.count("-I PREROUTING 1 -j NIK_MGL_PRE_CTRL_V4") == 1
+    assert rules.count("-I PREROUTING 1 -j NIK_MGL_PRE_CTRL_V6") == 1
     # iptables -I 1 reverses command order: emitting TCP before DNS leaves DNS first.
     assert rules.index("-I PREROUTING 1 -j NIK_NAT_PRE_TCP_V4") < rules.index("-I PREROUTING 1 -j NIK_NAT_PRE_DNS_V4")
     assert rules.index("-I OUTPUT 1 -j NIK_NAT_OUT_TCP_V4") < rules.index("-I OUTPUT 1 -j NIK_NAT_OUT_DNS_V4")
@@ -337,19 +359,104 @@ log() {{ printf '[%s] %s\\n' "$1" "$2" >> "$APP_LOG_PATH"; }}
     assert "-j REDIRECT --to-ports 7891" in rules
     assert "-j REDIRECT --to-ports 1053" in rules
     assert "--mac-source AA:BB:CC:DD:EE:FF" in rules
+    assert "-s 192.0.2.10" in rules
+    assert "-s 2001:db8::10" in rules
+    # Family-specific selectors must not become wildcard rules in the other family.
+    assert "NIK_NAT_PRE_TCP_V4 -i br-lan -s 2001:db8::10" not in rules
+    assert "NIK_NAT_PRE_TCP_V6 -i br-lan -s 192.0.2.10" not in rules
     assert "--uid-owner root" in rules
     assert "--gid-owner root" in rules
     assert "--set-xmark 0x80/0xFF" in rules
     assert "--dports 80,443,8000:8010" in rules
     assert "--dports 53,123,443" in rules
+    assert "# IPv4 / iptables-restore" in rules
+    assert "# IPv6 / ip6tables-restore" in rules
+    assert "nik_reserved_v6" in rules
+    assert "nik_china_v6" in rules
     assert "nft" not in rules.lower()
     assert not re.search(r"--(?:on-port|to-ports)\s*(?:$|\n)", rules)
 
+
+
+def test_firewall_apply(tmp: Path, common: dict) -> None:
+    runtime = tmp / "runtime-apply"
+    runtime.mkdir()
+    (runtime / "config.yaml").write_text("test: true\n")
+    include = tmp / "include-apply.sh"
+    write(
+        include,
+        f"""#!/bin/sh
+TEMP_DIR="{runtime}"
+RUN_PROFILE_PATH="{runtime / 'config.yaml'}"
+APP_LOG_PATH="{runtime / 'app.log'}"
+prepare_files() {{ mkdir -p "$TEMP_DIR"; : > "$APP_LOG_PATH"; }}
+log() {{ printf '[%s] %s\\n' "$1" "$2" >> "$APP_LOG_PATH"; }}
+""",
+    )
+    script = tmp / "firewall-apply.sh"
+    transformed_script(ROOT / "nikki/files/scripts/firewall_fw3.sh", script, common["functions"], include)
+
+    capture = tmp / "capture"
+    capture.mkdir()
+    xtables_mock = """#!/bin/sh
+case " $* " in
+  *" -C "*) exit 1 ;;
+  *) exit 0 ;;
+esac
+"""
+    for name in ["iptables", "ip6tables"]:
+        write(common["bin"] / name, xtables_mock)
+    write(
+        common["bin"] / "iptables-restore",
+        f"""#!/bin/sh
+cat > "{capture / 'iptables.rules'}"
+""",
+    )
+    write(
+        common["bin"] / "ip6tables-restore",
+        f"""#!/bin/sh
+cat > "{capture / 'ip6tables.rules'}"
+""",
+    )
+    write(
+        common["bin"] / "ipset",
+        f"""#!/bin/sh
+if [ "$1" = restore ]; then
+    cat > "{capture / 'ipset.rules'}"
+fi
+exit 0
+""",
+    )
+    china4 = tmp / "china4.txt"
+    china6 = tmp / "china6.txt"
+    china4.write_text("1.0.1.0/24\n")
+    china6.write_text("2400:3200::/32\n")
+
+    env = os.environ.copy()
+    env["PATH"] = f"{common['bin']}:{env['PATH']}"
+    env["LOCK_DIR"] = str(tmp / "nikki-fw.lock")
+    env["CHINA_IP4_FILE"] = str(china4)
+    env["CHINA_IP6_FILE"] = str(china6)
+    run(["/bin/sh", str(script), "apply"], env=env)
+
+    rules4 = (capture / "iptables.rules").read_text()
+    rules6 = (capture / "ip6tables.rules").read_text()
+    sets = (capture / "ipset.rules").read_text()
+    assert "NIK_MGL_PRE_TPROXY_V4" in rules4
+    assert "NIK_MGL_PRE_TPROXY_V6" in rules6
+    assert "family inet6" in sets
+    assert "add nik_reserved_v6_t ::1/128 -exist" in sets
+    assert "add nik_china_v6_t 2400:3200::/32 -exist" in sets
+    assert "add nik_china_v4_t 1.0.1.0/24 -exist" in sets
 
 def test_static() -> None:
     assert not (ROOT / ".github").exists()
     assert not (ROOT / "nikki/files/ucode").exists()
     assert not (ROOT / "nikki/files/nftables").exists()
+    assert (ROOT / "nikki/files/ipset/geoip6_cn.txt").exists()
+    makefile = (ROOT / "nikki/Makefile").read_text()
+    assert "+ip6tables" in makefile
+    assert "+ip6tables-mod-nat" in makefile
     assert not (ROOT / "luci-app-nikki/root/usr/share/rpcd/ucode").exists()
     shell_files = list(ROOT.rglob("*.sh")) + list(ROOT.rglob("*.init"))
     for path in shell_files:
@@ -370,6 +477,7 @@ def main() -> None:
         common = make_common_mocks(tmp)
         test_mixin(tmp, common)
         test_firewall(tmp, common)
+        test_firewall_apply(tmp, common)
     print("All Nikki Legacy tests passed.")
 
 

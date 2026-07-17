@@ -21,6 +21,7 @@ TEMP_DIR="/var/run/nikki"
 PID_FILE_PATH="$TEMP_DIR/nikki.pid"
 STARTED_FLAG_PATH="$TEMP_DIR/started.flag"
 BRIDGE_NF_CALL_IPTABLES_FLAG_PATH="$TEMP_DIR/bridge_nf_call_iptables.flag"
+BRIDGE_NF_CALL_IP6TABLES_FLAG_PATH="$TEMP_DIR/bridge_nf_call_ip6tables.flag"
 
 # scripts
 SH_DIR="$HOME_DIR/scripts"
@@ -32,6 +33,7 @@ FIREWALL_INCLUDE_SH="$SH_DIR/firewall_include.sh"
 # ipset data
 IPSET_DIR="$HOME_DIR/ipset"
 GEOIP_CN_TXT="$IPSET_DIR/geoip_cn.txt"
+GEOIP6_CN_TXT="$IPSET_DIR/geoip6_cn.txt"
 
 # functions
 format_filesize() {

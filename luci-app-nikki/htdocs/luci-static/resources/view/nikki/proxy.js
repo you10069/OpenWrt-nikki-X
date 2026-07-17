@@ -33,7 +33,7 @@ return view.extend({
         o.rmempty = false;
 
         o = s.taboption('proxy', form.DummyValue, '_legacy_scope', _('Legacy Backend'));
-        o.default = _('IPv4: TCP Redirect + UDP TPROXY (firewall3/iptables)');
+        o.default = _('IPv4/IPv6: TCP Redirect + UDP TPROXY (firewall3/xtables)');
 
         o = s.taboption('proxy', form.ListValue, 'tcp_mode', _('TCP Mode'));
         o.optional = true;
@@ -48,7 +48,13 @@ return view.extend({
         o = s.taboption('proxy', form.Flag, 'ipv4_dns_hijack', _('IPv4 DNS Hijack'));
         o.rmempty = false;
 
+        o = s.taboption('proxy', form.Flag, 'ipv6_dns_hijack', _('IPv6 DNS Hijack'));
+        o.rmempty = false;
+
         o = s.taboption('proxy', form.Flag, 'ipv4_proxy', _('IPv4 Proxy'));
+        o.rmempty = false;
+
+        o = s.taboption('proxy', form.Flag, 'ipv6_proxy', _('IPv6 Proxy'));
         o.rmempty = false;
 
         s.tab('router', _('Router Proxy'));
@@ -126,6 +132,17 @@ return view.extend({
             };
         };
 
+        so = o.subsection.option(form.DynamicList, 'ip6', 'IP6');
+        so.datatype = 'ip6addr';
+
+        for (const mac in hosts) {
+            const host = hosts[mac];
+            for (const ip of (host.ip6addrs ?? [])) {
+                const hint = host.name ?? mac;
+                so.value(ip, hint ? '%s (%s)'.format(ip, hint) : ip);
+            };
+        };
+
         so = o.subsection.option(form.DynamicList, 'mac', 'MAC');
         so.datatype = 'macaddr';
 
@@ -144,6 +161,9 @@ return view.extend({
         s.tab('bypass', _('Bypass'));
 
         o = s.taboption('bypass', form.Flag, 'bypass_china_mainland_ip', _('Bypass China Mainland IP'));
+        o.rmempty = false;
+
+        o = s.taboption('bypass', form.Flag, 'bypass_china_mainland_ip6', _('Bypass China Mainland IP6'));
         o.rmempty = false;
 
         o = s.taboption('bypass', form.Value, 'proxy_tcp_dport', _('Destination TCP Port to Proxy'));
@@ -165,6 +185,9 @@ return view.extend({
 
         o = s.taboption('misc', form.DynamicList, 'reserved_ip', _('Reserved IP'));
         o.datatype = 'ip4addr';
+
+        o = s.taboption('misc', form.DynamicList, 'reserved_ip6', _('Reserved IP6'));
+        o.datatype = 'ip6addr';
 
         return m.render();
     }

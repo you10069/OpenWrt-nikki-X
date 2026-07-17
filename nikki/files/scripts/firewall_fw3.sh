@@ -1,31 +1,49 @@
 #!/bin/sh
 
-# Nikki legacy firewall3/iptables backend.
-# First release scope: IPv4, TCP REDIRECT, UDP TPROXY, router + LAN DNS hijack.
+# Nikki legacy firewall3/xtables backend.
+# Supported data plane: IPv4 + IPv6, TCP REDIRECT, UDP TPROXY,
+# router/LAN DNS hijack and access control.
 
 . /lib/functions.sh
 . /etc/nikki/scripts/include.sh
 
-IPT="${IPT:-iptables}"
+IPT4="${IPT4:-iptables}"
+IPT6="${IPT6:-ip6tables}"
+IPT4_RESTORE="${IPT4_RESTORE:-iptables-restore}"
+IPT6_RESTORE="${IPT6_RESTORE:-ip6tables-restore}"
 IPSET="${IPSET:-ipset}"
-LOCK_DIR="/var/lock/nikki-fw3.lock"
-RULES_FILE="$TEMP_DIR/iptables.rules"
+LOCK_DIR="${LOCK_DIR:-/var/lock/nikki-fw3.lock}"
+RULES_FILE_V4="$TEMP_DIR/iptables-v4.rules"
+RULES_FILE_V6="$TEMP_DIR/iptables-v6.rules"
 IPSET_FILE="$TEMP_DIR/ipset.rules"
-CHINA_IP_FILE="/etc/nikki/ipset/geoip_cn.txt"
+CHINA_IP4_FILE="${CHINA_IP4_FILE:-/etc/nikki/ipset/geoip_cn.txt}"
+CHINA_IP6_FILE="${CHINA_IP6_FILE:-/etc/nikki/ipset/geoip6_cn.txt}"
 
 # Agreed short and explicit chain names.
-NAT_PRE_DNS="NIK_NAT_PRE_DNS_V4"
-NAT_PRE_TCP="NIK_NAT_PRE_TCP_V4"
-NAT_OUT_DNS="NIK_NAT_OUT_DNS_V4"
-NAT_OUT_TCP="NIK_NAT_OUT_TCP_V4"
-MGL_PRE_CTRL="NIK_MGL_PRE_CTRL_V4"
-MGL_PRE_TPROXY="NIK_MGL_PRE_TPROXY_V4"
-MGL_OUT_MARK="NIK_MGL_OUT_MARK_V4"
+NAT_PRE_DNS_V4="NIK_NAT_PRE_DNS_V4"
+NAT_PRE_TCP_V4="NIK_NAT_PRE_TCP_V4"
+NAT_OUT_DNS_V4="NIK_NAT_OUT_DNS_V4"
+NAT_OUT_TCP_V4="NIK_NAT_OUT_TCP_V4"
+MGL_PRE_CTRL_V4="NIK_MGL_PRE_CTRL_V4"
+MGL_PRE_TPROXY_V4="NIK_MGL_PRE_TPROXY_V4"
+MGL_OUT_MARK_V4="NIK_MGL_OUT_MARK_V4"
 
-SET_RESERVED="nik_reserved_v4"
-SET_RESERVED_TMP="nik_reserved_v4_t"
-SET_CHINA="nik_china_v4"
-SET_CHINA_TMP="nik_china_v4_t"
+NAT_PRE_DNS_V6="NIK_NAT_PRE_DNS_V6"
+NAT_PRE_TCP_V6="NIK_NAT_PRE_TCP_V6"
+NAT_OUT_DNS_V6="NIK_NAT_OUT_DNS_V6"
+NAT_OUT_TCP_V6="NIK_NAT_OUT_TCP_V6"
+MGL_PRE_CTRL_V6="NIK_MGL_PRE_CTRL_V6"
+MGL_PRE_TPROXY_V6="NIK_MGL_PRE_TPROXY_V6"
+MGL_OUT_MARK_V6="NIK_MGL_OUT_MARK_V6"
+
+SET_RESERVED_V4="nik_reserved_v4"
+SET_RESERVED_V4_TMP="nik_reserved_v4_t"
+SET_CHINA_V4="nik_china_v4"
+SET_CHINA_V4_TMP="nik_china_v4_t"
+SET_RESERVED_V6="nik_reserved_v6"
+SET_RESERVED_V6_TMP="nik_reserved_v6_t"
+SET_CHINA_V6="nik_china_v6"
+SET_CHINA_V6_TMP="nik_china_v6_t"
 
 acquire_lock() {
 	local count=0
@@ -70,30 +88,42 @@ extract_listen_port() {
 	printf '%s\n' "$1" | sed -n 's/^.*:\([0-9][0-9]*\)$/\1/p; t; /^[0-9][0-9]*$/p'
 }
 
-# Resolve only the listeners required by the selected backend modes. This lets
-# users disable DNS, TCP or UDP independently without needing unused ports.
+dns_listener_supports_ipv6() {
+	case "$1" in
+		\[*\]:[0-9]*|:[0-9]*|[0-9]*) return 0 ;;
+		*) return 1 ;;
+	esac
+}
+
+# Resolve only listeners required by enabled address families and modes.
 load_ports() {
 	local redirect_listener tproxy_listener dns_listen
 	REDIR_PORT=''
 	TPROXY_PORT=''
 	DNS_PORT=''
+	DNS_LISTEN=''
 	config_get redirect_listener core redirect_listener_name redir-in
 	config_get tproxy_listener core tproxy_listener_name tproxy-in
 
-	if [ "$IPV4_PROXY" -eq 1 ] && [ "$TCP_MODE" = redirect ]; then
+	if { [ "$IPV4_PROXY" -eq 1 ] || [ "$IPV6_PROXY" -eq 1 ]; } && [ "$TCP_MODE" = redirect ]; then
 		REDIR_PORT="$(REDIRECT_LISTENER="$redirect_listener" yq -M -r '."redir-port" // (.listeners[]? | select(.name == env(REDIRECT_LISTENER) and .type == "redir") | .port) // ""' "$RUN_PROFILE_PATH" 2>/dev/null)"
 		valid_port "$REDIR_PORT" || return 1
 	fi
 
-	if [ "$IPV4_PROXY" -eq 1 ] && [ "$UDP_MODE" = tproxy ]; then
+	if { [ "$IPV4_PROXY" -eq 1 ] || [ "$IPV6_PROXY" -eq 1 ]; } && [ "$UDP_MODE" = tproxy ]; then
 		TPROXY_PORT="$(TPROXY_LISTENER="$tproxy_listener" yq -M -r '."tproxy-port" // (.listeners[]? | select(.name == env(TPROXY_LISTENER) and .type == "tproxy") | .port) // ""' "$RUN_PROFILE_PATH" 2>/dev/null)"
 		valid_port "$TPROXY_PORT" || return 1
 	fi
 
-	if [ "$IPV4_DNS_HIJACK" -eq 1 ]; then
+	if [ "$IPV4_DNS_HIJACK" -eq 1 ] || [ "$IPV6_DNS_HIJACK" -eq 1 ]; then
 		dns_listen="$(yq -M -r '.dns.listen // ""' "$RUN_PROFILE_PATH" 2>/dev/null)"
+		DNS_LISTEN="$dns_listen"
 		DNS_PORT="$(extract_listen_port "$dns_listen")"
 		valid_port "$DNS_PORT" || return 1
+		if [ "$IPV6_DNS_HIJACK" -eq 1 ] && ! dns_listener_supports_ipv6 "$dns_listen"; then
+			log "Firewall" "IPv6 DNS hijack requires an IPv6-capable DNS listen address (for example [::]:1053)."
+			return 1
+		fi
 	fi
 	return 0
 }
@@ -136,84 +166,126 @@ valid_ipv4_or_cidr() {
 	'
 }
 
+valid_ipv6_or_cidr() {
+	local value="$1" address prefix
+	case "$value" in
+		''|*[!0-9a-fA-F:./]*) return 1 ;;
+	esac
+	address="${value%%/*}"
+	[ "$address" != "$value" ] && prefix="${value#*/}" || prefix=""
+	case "$address" in *:*) ;; *) return 1 ;; esac
+	if [ -n "$prefix" ]; then
+		case "$prefix" in ''|*[!0-9]*) return 1 ;; esac
+		[ "$prefix" -ge 0 ] && [ "$prefix" -le 128 ] || return 1
+	fi
+	return 0
+}
+
 prepare_ipsets() {
 	: > "$IPSET_FILE"
 	cat >> "$IPSET_FILE" <<-EOF_IPSET
-	create $SET_RESERVED hash:net family inet hashsize 128 maxelem 1024 -exist
-	create $SET_RESERVED_TMP hash:net family inet hashsize 128 maxelem 1024 -exist
-	flush $SET_RESERVED_TMP
+	create $SET_RESERVED_V4 hash:net family inet hashsize 128 maxelem 1024 -exist
+	create $SET_RESERVED_V4_TMP hash:net family inet hashsize 128 maxelem 1024 -exist
+	flush $SET_RESERVED_V4_TMP
 	EOF_IPSET
 
-	_add_reserved_ip() {
-		valid_ipv4_or_cidr "$1" && printf 'add %s %s -exist\n' "$SET_RESERVED_TMP" "$1" >> "$IPSET_FILE"
+	_add_reserved_ip4() {
+		valid_ipv4_or_cidr "$1" && printf 'add %s %s -exist\n' "$SET_RESERVED_V4_TMP" "$1" >> "$IPSET_FILE"
 	}
-	config_list_foreach proxy reserved_ip _add_reserved_ip
+	config_list_foreach proxy reserved_ip _add_reserved_ip4
 	cat >> "$IPSET_FILE" <<-EOF_IPSET
-	swap $SET_RESERVED_TMP $SET_RESERVED
-	destroy $SET_RESERVED_TMP
-	create $SET_CHINA hash:net family inet hashsize 4096 maxelem 65536 -exist
-	create $SET_CHINA_TMP hash:net family inet hashsize 4096 maxelem 65536 -exist
-	flush $SET_CHINA_TMP
+	swap $SET_RESERVED_V4_TMP $SET_RESERVED_V4
+	destroy $SET_RESERVED_V4_TMP
+	create $SET_CHINA_V4 hash:net family inet hashsize 4096 maxelem 65536 -exist
+	create $SET_CHINA_V4_TMP hash:net family inet hashsize 4096 maxelem 65536 -exist
+	flush $SET_CHINA_V4_TMP
 	EOF_IPSET
-
-	if [ "$BYPASS_CHINA" -eq 1 ] && [ -r "$CHINA_IP_FILE" ]; then
-		awk -v set="$SET_CHINA_TMP" 'NF && $1 !~ /^#/ { print "add " set " " $1 " -exist" }' "$CHINA_IP_FILE" >> "$IPSET_FILE"
+	if [ "$BYPASS_CHINA_V4" -eq 1 ] && [ -r "$CHINA_IP4_FILE" ]; then
+		awk -v set="$SET_CHINA_V4_TMP" 'NF && $1 !~ /^#/ { print "add " set " " $1 " -exist" }' "$CHINA_IP4_FILE" >> "$IPSET_FILE"
 	fi
 	cat >> "$IPSET_FILE" <<-EOF_IPSET
-	swap $SET_CHINA_TMP $SET_CHINA
-	destroy $SET_CHINA_TMP
+	swap $SET_CHINA_V4_TMP $SET_CHINA_V4
+	destroy $SET_CHINA_V4_TMP
+	create $SET_RESERVED_V6 hash:net family inet6 hashsize 128 maxelem 1024 -exist
+	create $SET_RESERVED_V6_TMP hash:net family inet6 hashsize 128 maxelem 1024 -exist
+	flush $SET_RESERVED_V6_TMP
+	EOF_IPSET
+
+	_add_reserved_ip6() {
+		valid_ipv6_or_cidr "$1" && printf 'add %s %s -exist\n' "$SET_RESERVED_V6_TMP" "$1" >> "$IPSET_FILE"
+	}
+	config_list_foreach proxy reserved_ip6 _add_reserved_ip6
+	cat >> "$IPSET_FILE" <<-EOF_IPSET
+	swap $SET_RESERVED_V6_TMP $SET_RESERVED_V6
+	destroy $SET_RESERVED_V6_TMP
+	create $SET_CHINA_V6 hash:net family inet6 hashsize 4096 maxelem 65536 -exist
+	create $SET_CHINA_V6_TMP hash:net family inet6 hashsize 4096 maxelem 65536 -exist
+	flush $SET_CHINA_V6_TMP
+	EOF_IPSET
+	if [ "$BYPASS_CHINA_V6" -eq 1 ] && [ -r "$CHINA_IP6_FILE" ]; then
+		awk -v set="$SET_CHINA_V6_TMP" 'NF && $1 !~ /^#/ { print "add " set " " $1 " -exist" }' "$CHINA_IP6_FILE" >> "$IPSET_FILE"
+	fi
+	cat >> "$IPSET_FILE" <<-EOF_IPSET
+	swap $SET_CHINA_V6_TMP $SET_CHINA_V6
+	destroy $SET_CHINA_V6_TMP
 	EOF_IPSET
 
 	$IPSET restore < "$IPSET_FILE"
 }
 
 remove_jump() {
-	local table="$1" builtin="$2" chain="$3"
-	while $IPT -t "$table" -C "$builtin" -j "$chain" >/dev/null 2>&1; do
-		$IPT -t "$table" -D "$builtin" -j "$chain" >/dev/null 2>&1 || break
+	local cmd="$1" table="$2" builtin="$3" chain="$4"
+	while "$cmd" -t "$table" -C "$builtin" -j "$chain" >/dev/null 2>&1; do
+		"$cmd" -t "$table" -D "$builtin" -j "$chain" >/dev/null 2>&1 || break
 	done
 }
 
 remove_chain() {
-	local table="$1" chain="$2"
-	$IPT -t "$table" -F "$chain" >/dev/null 2>&1
-	$IPT -t "$table" -X "$chain" >/dev/null 2>&1
+	local cmd="$1" table="$2" chain="$3"
+	"$cmd" -t "$table" -F "$chain" >/dev/null 2>&1
+	"$cmd" -t "$table" -X "$chain" >/dev/null 2>&1
+}
+
+remove_family_rules() {
+	local cmd="$1" nat_pre_dns="$2" nat_pre_tcp="$3" nat_out_dns="$4" nat_out_tcp="$5" mgl_pre_ctrl="$6" mgl_pre_tproxy="$7" mgl_out_mark="$8"
+	remove_jump "$cmd" nat PREROUTING "$nat_pre_dns"
+	remove_jump "$cmd" nat PREROUTING "$nat_pre_tcp"
+	remove_jump "$cmd" nat OUTPUT "$nat_out_dns"
+	remove_jump "$cmd" nat OUTPUT "$nat_out_tcp"
+	remove_jump "$cmd" mangle PREROUTING "$mgl_pre_ctrl"
+	remove_jump "$cmd" mangle OUTPUT "$mgl_out_mark"
+
+	remove_chain "$cmd" nat "$nat_pre_dns"
+	remove_chain "$cmd" nat "$nat_pre_tcp"
+	remove_chain "$cmd" nat "$nat_out_dns"
+	remove_chain "$cmd" nat "$nat_out_tcp"
+	remove_chain "$cmd" mangle "$mgl_pre_ctrl"
+	remove_chain "$cmd" mangle "$mgl_pre_tproxy"
+	remove_chain "$cmd" mangle "$mgl_out_mark"
 }
 
 remove_rules_only() {
-	remove_jump nat PREROUTING "$NAT_PRE_DNS"
-	remove_jump nat PREROUTING "$NAT_PRE_TCP"
-	remove_jump nat OUTPUT "$NAT_OUT_DNS"
-	remove_jump nat OUTPUT "$NAT_OUT_TCP"
-	remove_jump mangle PREROUTING "$MGL_PRE_CTRL"
-	remove_jump mangle OUTPUT "$MGL_OUT_MARK"
-
-	remove_chain nat "$NAT_PRE_DNS"
-	remove_chain nat "$NAT_PRE_TCP"
-	remove_chain nat "$NAT_OUT_DNS"
-	remove_chain nat "$NAT_OUT_TCP"
-	remove_chain mangle "$MGL_PRE_CTRL"
-	remove_chain mangle "$MGL_PRE_TPROXY"
-	remove_chain mangle "$MGL_OUT_MARK"
+	remove_family_rules "$IPT4" "$NAT_PRE_DNS_V4" "$NAT_PRE_TCP_V4" "$NAT_OUT_DNS_V4" "$NAT_OUT_TCP_V4" "$MGL_PRE_CTRL_V4" "$MGL_PRE_TPROXY_V4" "$MGL_OUT_MARK_V4"
+	remove_family_rules "$IPT6" "$NAT_PRE_DNS_V6" "$NAT_PRE_TCP_V6" "$NAT_OUT_DNS_V6" "$NAT_OUT_TCP_V6" "$MGL_PRE_CTRL_V6" "$MGL_PRE_TPROXY_V6" "$MGL_OUT_MARK_V6"
 }
 
 remove_all() {
 	acquire_lock || return 1
 	remove_rules_only
-	$IPSET destroy "$SET_RESERVED" >/dev/null 2>&1
-	$IPSET destroy "$SET_RESERVED_TMP" >/dev/null 2>&1
-	$IPSET destroy "$SET_CHINA" >/dev/null 2>&1
-	$IPSET destroy "$SET_CHINA_TMP" >/dev/null 2>&1
+	for set_name in \
+		"$SET_RESERVED_V4" "$SET_RESERVED_V4_TMP" "$SET_CHINA_V4" "$SET_CHINA_V4_TMP" \
+		"$SET_RESERVED_V6" "$SET_RESERVED_V6_TMP" "$SET_CHINA_V6" "$SET_CHINA_V6_TMP"; do
+		$IPSET destroy "$set_name" >/dev/null 2>&1
+	done
 	release_lock
 }
 
 rule() {
-	# Append one iptables-restore rule verbatim.
 	printf '%s\n' "$*" >> "$RULES_FILE"
 }
 
 normalize_port_tokens() {
-	local input="$1" token output="" count=0 chunk="" first last normalized
+	local input="$1" token count=0 chunk="" first last normalized
 	PORT_ALL=0
 	PORT_CHUNKS=""
 	[ -n "$input" ] || input="0-65535"
@@ -252,7 +324,6 @@ normalize_port_tokens() {
 }
 
 emit_port_action() {
-	# $1 chain, $2 base match, $3 target; protocol must already be in base.
 	local chain="$1" base="$2" target="$3" chunk oldifs
 	if [ "$PORT_ALL" -eq 1 ]; then
 		rule "-A $chain $base $target"
@@ -291,7 +362,6 @@ emit_fwmark_bypass() {
 }
 
 emit_common_bypass() {
-	# $1 chain, $2 base match (usually -i DEV -p tcp/udp)
 	local chain="$1" base="$2"
 	rule "-A $chain $base -m mark --mark $CORE_MARK/$CORE_MASK -j RETURN"
 	rule "-A $chain $base -m addrtype --dst-type LOCAL -j RETURN"
@@ -313,7 +383,9 @@ LAN_CHAIN=""
 LAN_BASE=""
 LAN_KIND=""
 LAN_DNS_PORT=""
-LAN_HAS_SELECTOR=0
+LAN_IP_OPTION=""
+LAN_VALIDATE_FN=""
+LAN_DNS=0
 LAN_ACL_PROXY=0
 
 _emit_lan_proxy_target() {
@@ -322,11 +394,11 @@ _emit_lan_proxy_target() {
 	case "$LAN_KIND" in
 		dns)
 			if [ "$dns" -eq 1 ]; then
-			rule "-A $LAN_CHAIN $base -p udp --dport 53 -j REDIRECT --to-ports $LAN_DNS_PORT"
-			rule "-A $LAN_CHAIN $base -p tcp --dport 53 -j REDIRECT --to-ports $LAN_DNS_PORT"
+				rule "-A $LAN_CHAIN $base -p udp --dport 53 -j REDIRECT --to-ports $LAN_DNS_PORT"
+				rule "-A $LAN_CHAIN $base -p tcp --dport 53 -j REDIRECT --to-ports $LAN_DNS_PORT"
 			else
-			rule "-A $LAN_CHAIN $base -p udp --dport 53 -j RETURN"
-			rule "-A $LAN_CHAIN $base -p tcp --dport 53 -j RETURN"
+				rule "-A $LAN_CHAIN $base -p udp --dport 53 -j RETURN"
+				rule "-A $LAN_CHAIN $base -p tcp --dport 53 -j RETURN"
 			fi
 			;;
 		tcp)
@@ -338,7 +410,6 @@ _emit_lan_proxy_target() {
 			fi
 			;;
 		udp)
-			# DNS opted into hijacking must reach nat/PREROUTING instead of TPROXY.
 			[ "$dns" -eq 1 ] && rule "-A $LAN_CHAIN $base -p udp --dport 53 -j RETURN"
 			if [ "$proxy" -eq 1 ]; then
 				emit_port_action "$LAN_CHAIN" "$base -p udp" "-j $MGL_PRE_TPROXY"
@@ -351,33 +422,27 @@ _emit_lan_proxy_target() {
 }
 
 _emit_lan_ip() {
-	LAN_HAS_SELECTOR=1
-	valid_ipv4_or_cidr "$1" && _emit_lan_proxy_target "-s $1" "$LAN_DNS" "$LAN_ACL_PROXY"
+	"$LAN_VALIDATE_FN" "$1" && _emit_lan_proxy_target "-s $1" "$LAN_DNS" "$LAN_ACL_PROXY"
 }
 
 _emit_lan_mac() {
-	LAN_HAS_SELECTOR=1
 	printf '%s' "$1" | grep -Eqi '^([0-9a-f]{2}:){5}[0-9a-f]{2}$' && \
 		_emit_lan_proxy_target "-m mac --mac-source $1" "$LAN_DNS" "$LAN_ACL_PROXY"
 }
 
 _emit_lan_acl_section() {
-	local section="$1" enabled unsupported_ip6
+	local section="$1" enabled selector_count
 	config_get_bool enabled "$section" enabled 0
 	[ "$enabled" -eq 1 ] || return 0
 	config_get_bool LAN_DNS "$section" dns 0
 	config_get_bool LAN_ACL_PROXY "$section" proxy 0
-	LAN_HAS_SELECTOR=0
-	config_list_foreach "$section" ip _emit_lan_ip
+	selector_count=$(( $(list_count "$section" ip) + $(list_count "$section" ip6) + $(list_count "$section" mac) ))
+	config_list_foreach "$section" "$LAN_IP_OPTION" _emit_lan_ip
 	config_list_foreach "$section" mac _emit_lan_mac
-	unsupported_ip6="$(list_count "$section" ip6)"
-	if [ "$LAN_HAS_SELECTOR" -eq 0 ] && [ "$unsupported_ip6" -eq 0 ]; then
-		_emit_lan_proxy_target "" "$LAN_DNS" "$LAN_ACL_PROXY"
-	fi
+	[ "$selector_count" -eq 0 ] && _emit_lan_proxy_target "" "$LAN_DNS" "$LAN_ACL_PROXY"
 }
 
 emit_lan_acl() {
-	# $1 chain, $2 interface, $3 kind dns|tcp|udp
 	LAN_CHAIN="$1"
 	LAN_BASE="-i $2"
 	LAN_KIND="$3"
@@ -387,7 +452,6 @@ emit_lan_acl() {
 
 RTR_CHAIN=""
 RTR_KIND=""
-RTR_HAS_SELECTOR=0
 RTR_DNS=0
 RTR_PROXY=0
 
@@ -457,7 +521,32 @@ emit_router_acl() {
 	config_foreach _emit_router_acl_section router_access_control
 }
 
-generate_rules() {
+select_family_context() {
+	case "$1" in
+		4)
+			RULES_FILE="$RULES_FILE_V4"
+			NAT_PRE_DNS="$NAT_PRE_DNS_V4"; NAT_PRE_TCP="$NAT_PRE_TCP_V4"
+			NAT_OUT_DNS="$NAT_OUT_DNS_V4"; NAT_OUT_TCP="$NAT_OUT_TCP_V4"
+			MGL_PRE_CTRL="$MGL_PRE_CTRL_V4"; MGL_PRE_TPROXY="$MGL_PRE_TPROXY_V4"; MGL_OUT_MARK="$MGL_OUT_MARK_V4"
+			SET_RESERVED="$SET_RESERVED_V4"; SET_CHINA="$SET_CHINA_V4"
+			FAMILY_PROXY="$IPV4_PROXY"; FAMILY_DNS="$IPV4_DNS_HIJACK"; BYPASS_CHINA="$BYPASS_CHINA_V4"
+			LAN_IP_OPTION="ip"; LAN_VALIDATE_FN="valid_ipv4_or_cidr"
+			;;
+		6)
+			RULES_FILE="$RULES_FILE_V6"
+			NAT_PRE_DNS="$NAT_PRE_DNS_V6"; NAT_PRE_TCP="$NAT_PRE_TCP_V6"
+			NAT_OUT_DNS="$NAT_OUT_DNS_V6"; NAT_OUT_TCP="$NAT_OUT_TCP_V6"
+			MGL_PRE_CTRL="$MGL_PRE_CTRL_V6"; MGL_PRE_TPROXY="$MGL_PRE_TPROXY_V6"; MGL_OUT_MARK="$MGL_OUT_MARK_V6"
+			SET_RESERVED="$SET_RESERVED_V6"; SET_CHINA="$SET_CHINA_V6"
+			FAMILY_PROXY="$IPV6_PROXY"; FAMILY_DNS="$IPV6_DNS_HIJACK"; BYPASS_CHINA="$BYPASS_CHINA_V6"
+			LAN_IP_OPTION="ip6"; LAN_VALIDATE_FN="valid_ipv6_or_cidr"
+			;;
+		*) return 1 ;;
+	esac
+}
+
+generate_family_rules() {
+	select_family_context "$1" || return 1
 	: > "$RULES_FILE"
 	cat >> "$RULES_FILE" <<-EOF_RULES
 	*nat
@@ -468,16 +557,16 @@ generate_rules() {
 	EOF_RULES
 
 	# Every -I ... 1 becomes the new first rule. Emit TCP first and DNS second
-	# so DNS remains ahead of the broad TCP redirect in the installed chain.
-	[ "$LAN_PROXY_ENABLED" -eq 1 ] && [ "$IPV4_PROXY" -eq 1 ] && [ "$TCP_MODE" = redirect ] && rule "-I PREROUTING 1 -j $NAT_PRE_TCP"
-	[ "$LAN_PROXY_ENABLED" -eq 1 ] && [ "$IPV4_DNS_HIJACK" -eq 1 ] && rule "-I PREROUTING 1 -j $NAT_PRE_DNS"
-	[ "$ROUTER_PROXY" -eq 1 ] && [ "$IPV4_PROXY" -eq 1 ] && [ "$TCP_MODE" = redirect ] && rule "-I OUTPUT 1 -j $NAT_OUT_TCP"
-	[ "$ROUTER_PROXY" -eq 1 ] && [ "$IPV4_DNS_HIJACK" -eq 1 ] && rule "-I OUTPUT 1 -j $NAT_OUT_DNS"
+	# so DNS stays ahead of broad TCP REDIRECT in the installed chain.
+	[ "$LAN_PROXY_ENABLED" -eq 1 ] && [ "$FAMILY_PROXY" -eq 1 ] && [ "$TCP_MODE" = redirect ] && rule "-I PREROUTING 1 -j $NAT_PRE_TCP"
+	[ "$LAN_PROXY_ENABLED" -eq 1 ] && [ "$FAMILY_DNS" -eq 1 ] && rule "-I PREROUTING 1 -j $NAT_PRE_DNS"
+	[ "$ROUTER_PROXY" -eq 1 ] && [ "$FAMILY_PROXY" -eq 1 ] && [ "$TCP_MODE" = redirect ] && rule "-I OUTPUT 1 -j $NAT_OUT_TCP"
+	[ "$ROUTER_PROXY" -eq 1 ] && [ "$FAMILY_DNS" -eq 1 ] && rule "-I OUTPUT 1 -j $NAT_OUT_DNS"
 
 	if [ "$LAN_PROXY_ENABLED" -eq 1 ]; then
 		for dev in $LAN_DEVICES; do
-			[ "$IPV4_DNS_HIJACK" -eq 1 ] && emit_lan_acl "$NAT_PRE_DNS" "$dev" dns
-			if [ "$IPV4_PROXY" -eq 1 ] && [ "$TCP_MODE" = redirect ]; then
+			[ "$FAMILY_DNS" -eq 1 ] && emit_lan_acl "$NAT_PRE_DNS" "$dev" dns
+			if [ "$FAMILY_PROXY" -eq 1 ] && [ "$TCP_MODE" = redirect ]; then
 				emit_common_bypass "$NAT_PRE_TCP" "-i $dev -p tcp"
 				normalize_port_tokens "$PROXY_TCP_DPORT"
 				emit_lan_acl "$NAT_PRE_TCP" "$dev" tcp
@@ -486,11 +575,11 @@ generate_rules() {
 	fi
 
 	if [ "$ROUTER_PROXY" -eq 1 ]; then
-		if [ "$IPV4_DNS_HIJACK" -eq 1 ]; then
+		if [ "$FAMILY_DNS" -eq 1 ]; then
 			rule "-A $NAT_OUT_DNS -m mark --mark $CORE_MARK/$CORE_MASK -j RETURN"
 			emit_router_acl "$NAT_OUT_DNS" dns
 		fi
-		if [ "$IPV4_PROXY" -eq 1 ] && [ "$TCP_MODE" = redirect ]; then
+		if [ "$FAMILY_PROXY" -eq 1 ] && [ "$TCP_MODE" = redirect ]; then
 			emit_common_bypass "$NAT_OUT_TCP" "-p tcp"
 			normalize_port_tokens "$PROXY_TCP_DPORT"
 			emit_router_acl "$NAT_OUT_TCP" tcp
@@ -505,7 +594,7 @@ generate_rules() {
 	:$MGL_OUT_MARK - [0:0]
 	EOF_RULES
 
-	if [ "$IPV4_PROXY" -eq 1 ] && [ "$UDP_MODE" = tproxy ]; then
+	if [ "$FAMILY_PROXY" -eq 1 ] && [ "$UDP_MODE" = tproxy ]; then
 		rule "-I PREROUTING 1 -j $MGL_PRE_CTRL"
 		[ "$ROUTER_PROXY" -eq 1 ] && rule "-I OUTPUT 1 -j $MGL_OUT_MARK"
 		rule "-A $MGL_PRE_TPROXY -p udp -j TPROXY --on-port $TPROXY_PORT --tproxy-mark $TPROXY_MARK/$TPROXY_MASK"
@@ -534,10 +623,13 @@ load_config() {
 	config_get TCP_MODE proxy tcp_mode redirect
 	config_get UDP_MODE proxy udp_mode tproxy
 	config_get_bool IPV4_PROXY proxy ipv4_proxy 1
+	config_get_bool IPV6_PROXY proxy ipv6_proxy 0
 	config_get_bool IPV4_DNS_HIJACK proxy ipv4_dns_hijack 1
+	config_get_bool IPV6_DNS_HIJACK proxy ipv6_dns_hijack 0
 	config_get_bool ROUTER_PROXY proxy router_proxy 1
 	config_get_bool LAN_PROXY_ENABLED proxy lan_proxy 1
-	config_get_bool BYPASS_CHINA proxy bypass_china_mainland_ip 0
+	config_get_bool BYPASS_CHINA_V4 proxy bypass_china_mainland_ip 0
+	config_get_bool BYPASS_CHINA_V6 proxy bypass_china_mainland_ip6 0
 	config_get PROXY_TCP_DPORT proxy proxy_tcp_dport 0-65535
 	config_get PROXY_UDP_DPORT proxy proxy_udp_dport 0-65535
 
@@ -550,6 +642,34 @@ load_config() {
 	config_list_foreach proxy lan_inbound_interface _add_lan_device
 }
 
+family_enabled() {
+	case "$1" in
+		4) [ "$IPV4_PROXY" -eq 1 ] || [ "$IPV4_DNS_HIJACK" -eq 1 ] ;;
+		6) [ "$IPV6_PROXY" -eq 1 ] || [ "$IPV6_DNS_HIJACK" -eq 1 ] ;;
+	esac
+}
+
+check_family_backend() {
+	local family="$1" cmd restore proxy dns
+	case "$family" in
+		4) cmd="$IPT4"; restore="$IPT4_RESTORE"; proxy="$IPV4_PROXY"; dns="$IPV4_DNS_HIJACK" ;;
+		6) cmd="$IPT6"; restore="$IPT6_RESTORE"; proxy="$IPV6_PROXY"; dns="$IPV6_DNS_HIJACK" ;;
+		*) return 1 ;;
+	esac
+	[ "$proxy" -eq 1 ] || [ "$dns" -eq 1 ] || return 0
+	command_exists "$cmd" || return 1
+	command_exists "$restore" || return 1
+	"$cmd" -m owner -h >/dev/null 2>&1 || return 1
+	"$cmd" -m set -h >/dev/null 2>&1 || return 1
+	if [ "$proxy" -eq 1 ] && [ "$UDP_MODE" = tproxy ]; then
+		"$cmd" -t mangle -j TPROXY -h >/dev/null 2>&1 || return 1
+	fi
+	if [ "$dns" -eq 1 ] || { [ "$proxy" -eq 1 ] && [ "$TCP_MODE" = redirect ]; }; then
+		"$cmd" -t nat -j REDIRECT -h >/dev/null 2>&1 || return 1
+	fi
+	return 0
+}
+
 apply_rules() {
 	acquire_lock || return 1
 	prepare_files
@@ -560,7 +680,7 @@ apply_rules() {
 		release_lock
 		return 0
 	}
-	if [ "$IPV4_PROXY" -ne 1 ] && [ "$IPV4_DNS_HIJACK" -ne 1 ]; then
+	if ! family_enabled 4 && ! family_enabled 6; then
 		remove_rules_only
 		release_lock
 		return 0
@@ -585,26 +705,48 @@ apply_rules() {
 		release_lock
 		return 1
 	}
+	check_family_backend 4 || {
+		log "Firewall" "Required IPv4 iptables extensions are unavailable."
+		release_lock
+		return 1
+	}
+	check_family_backend 6 || {
+		log "Firewall" "Required IPv6 ip6tables extensions are unavailable."
+		release_lock
+		return 1
+	}
 
-	if [ "$IPV4_PROXY" -eq 1 ]; then
+	if [ "$IPV4_PROXY" -eq 1 ] || [ "$IPV6_PROXY" -eq 1 ]; then
 		prepare_ipsets || {
-			log "Firewall" "Failed to prepare ipsets."
+			log "Firewall" "Failed to prepare IPv4/IPv6 ipsets."
 			release_lock
 			return 1
 		}
 	fi
 	remove_rules_only
-	generate_rules
-	if iptables-restore --noflush < "$RULES_FILE"; then
-		log "Firewall" "iptables rules applied."
-		release_lock
-		return 0
+
+	if family_enabled 4; then
+		generate_family_rules 4
+		if ! "$IPT4_RESTORE" --noflush < "$RULES_FILE_V4"; then
+			log "Firewall" "iptables-restore failed; removing partial rules."
+			remove_rules_only
+			release_lock
+			return 1
+		fi
+	fi
+	if family_enabled 6; then
+		generate_family_rules 6
+		if ! "$IPT6_RESTORE" --noflush < "$RULES_FILE_V6"; then
+			log "Firewall" "ip6tables-restore failed; removing partial rules."
+			remove_rules_only
+			release_lock
+			return 1
+		fi
 	fi
 
-	log "Firewall" "iptables-restore failed; removing partial rules."
-	remove_rules_only
+	log "Firewall" "IPv4/IPv6 xtables rules applied."
 	release_lock
-	return 1
+	return 0
 }
 
 render_rules() {
@@ -612,17 +754,23 @@ render_rules() {
 	load_config
 	[ -r "$RUN_PROFILE_PATH" ] || return 1
 	load_ports || return 1
-	generate_rules
-	cat "$RULES_FILE"
+	if family_enabled 4; then
+		generate_family_rules 4
+		printf '# IPv4 / iptables-restore\n'
+		cat "$RULES_FILE_V4"
+	fi
+	if family_enabled 6; then
+		generate_family_rules 6
+		printf '# IPv6 / ip6tables-restore\n'
+		cat "$RULES_FILE_V6"
+	fi
 }
 
 check_backend() {
-	command_exists "$IPT" || return 1
-	command_exists iptables-restore || return 1
+	load_config
 	command_exists "$IPSET" || return 1
-	$IPT -t mangle -j TPROXY -h >/dev/null 2>&1 || return 1
-	$IPT -m owner -h >/dev/null 2>&1 || return 1
-	$IPT -m set -h >/dev/null 2>&1 || return 1
+	check_family_backend 4 || return 1
+	check_family_backend 6 || return 1
 	return 0
 }
 
@@ -630,10 +778,6 @@ prepare_files
 
 case "${1:-apply}" in
 	apply|reload)
-		check_backend || {
-			log "Firewall" "Required iptables extensions are unavailable."
-			exit 1
-		}
 		apply_rules
 		;;
 	remove|stop)

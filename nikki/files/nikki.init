@@ -8,6 +8,24 @@ PROG="/usr/bin/mihomo"
 
 . "$IPKG_INSTROOT/etc/nikki/scripts/include.sh"
 
+remove_tproxy_policy_route() {
+	local family="$1" mark="$2" mask="$3" pref="$4" table="$5" prefix
+	[ "$family" = 6 ] && prefix='::/0' || prefix='0.0.0.0/0'
+	while ip "-$family" rule del pref "$pref" fwmark "$mark/$mask" table "$table" >/dev/null 2>&1; do :; done
+	while ip "-$family" route del local "$prefix" dev lo table "$table" >/dev/null 2>&1; do :; done
+}
+
+add_tproxy_policy_route() {
+	local family="$1" mark="$2" mask="$3" pref="$4" table="$5" prefix
+	[ "$family" = 6 ] && prefix='::/0' || prefix='0.0.0.0/0'
+	remove_tproxy_policy_route "$family" "$mark" "$mask" "$pref" "$table"
+	ip "-$family" route add local "$prefix" dev lo table "$table" || return 1
+	ip "-$family" rule add pref "$pref" fwmark "$mark/$mask" table "$table" || {
+		while ip "-$family" route del local "$prefix" dev lo table "$table" >/dev/null 2>&1; do :; done
+		return 1
+	}
+}
+
 extra_command 'update_subscription' 'Update subscription by section id'
 extra_command 'clear_logs' 'Clear logs if size exceeds the limit'
 
@@ -131,9 +149,6 @@ start_service() {
 			""|tproxy) ;;
 			*) log "Proxy" "Legacy v1 supports UDP TPROXY only (got: $udp_mode)."; log "App" "Exit."; return ;;
 		esac
-		if [ "$ipv6_dns_hijack" -eq 1 ] || [ "$ipv6_proxy" -eq 1 ]; then
-			log "Proxy" "IPv6 transparent proxy settings are ignored by legacy v1."
-		fi
 	fi
 	# get profile
 	local profile_type; profile_type=$(echo "$profile" | cut -d ':' -f 1)
@@ -222,7 +237,7 @@ start_service() {
 	# check profile
 	if [ "$core_only" = 0 ] && [ "$proxy_enabled" = 1 ]; then
 		log "Profile" "Checking..."
-		if [ "$ipv4_dns_hijack" = 1 ]; then
+		if [ "$ipv4_dns_hijack" = 1 ] || [ "$ipv6_dns_hijack" = 1 ]; then
 			if yq -M -e '(has("dns") and (.dns | .enable) and (.dns | has("listen"))) | not' "$RUN_PROFILE_PATH" > /dev/null 2>&1; then
 				log "Profile" "Check failed."
 				log "Profile" "DNS should be enabled and listen should be defined."
@@ -311,18 +326,20 @@ service_started() {
 	[ -f "$STARTED_FLAG_PATH" ] || return 0
 	config_load nikki
 
-	local proxy_enabled core_only ipv4_proxy ipv4_dns_hijack tcp_mode udp_mode
+	local proxy_enabled core_only ipv4_proxy ipv6_proxy ipv4_dns_hijack ipv6_dns_hijack tcp_mode udp_mode
 	config_get_bool proxy_enabled proxy enabled 0
 	config_get_bool core_only config core_only 0
 	config_get_bool ipv4_proxy proxy ipv4_proxy 1
+	config_get_bool ipv6_proxy proxy ipv6_proxy 0
 	config_get_bool ipv4_dns_hijack proxy ipv4_dns_hijack 1
+	config_get_bool ipv6_dns_hijack proxy ipv6_dns_hijack 0
 	config_get tcp_mode proxy tcp_mode redirect
 	config_get udp_mode proxy udp_mode tproxy
 
 	[ "$proxy_enabled" -eq 1 ] || { log "Proxy" "Disabled."; return 0; }
 	[ "$core_only" -eq 0 ] || { log "Proxy" "Core-only mode; firewall is not modified."; return 0; }
-	if [ "$ipv4_proxy" -ne 1 ] && [ "$ipv4_dns_hijack" -ne 1 ]; then
-		log "Proxy" "IPv4 proxy and DNS hijack are both disabled."
+	if [ "$ipv4_proxy" -ne 1 ] && [ "$ipv4_dns_hijack" -ne 1 ] && [ "$ipv6_proxy" -ne 1 ] && [ "$ipv6_dns_hijack" -ne 1 ]; then
+		log "Proxy" "IPv4/IPv6 proxy and DNS hijack are all disabled."
 		return 0
 	fi
 
@@ -332,39 +349,52 @@ service_started() {
 	config_get tproxy_rule_pref routing tproxy_rule_pref 1024
 	config_get tproxy_route_table routing tproxy_route_table 80
 
-	# UDP TPROXY requires a local policy route. Delete stale entries first so
-	# restart/reload operations remain idempotent.
-	if [ "$ipv4_proxy" -eq 1 ] && [ "$udp_mode" = tproxy ]; then
-		while ip -4 rule del pref "$tproxy_rule_pref" fwmark "$tproxy_fw_mark/$tproxy_fw_mask" table "$tproxy_route_table" >/dev/null 2>&1; do :; done
-		while ip -4 route del local default dev lo table "$tproxy_route_table" >/dev/null 2>&1; do :; done
-		ip -4 route add local default dev lo table "$tproxy_route_table" || {
-			log "Routing" "Failed to create TPROXY local route."
+	# IPv4 and IPv6 have separate policy routing databases, so the same mark,
+	# preference and table number can be used safely for both families.
+	if [ "$udp_mode" = tproxy ]; then
+		if [ "$ipv4_proxy" -eq 1 ] && ! add_tproxy_policy_route 4 "$tproxy_fw_mark" "$tproxy_fw_mask" "$tproxy_rule_pref" "$tproxy_route_table"; then
+			log "Routing" "Failed to create IPv4 TPROXY policy route."
 			return 1
-		}
-		ip -4 rule add pref "$tproxy_rule_pref" fwmark "$tproxy_fw_mark/$tproxy_fw_mask" table "$tproxy_route_table" || {
-			log "Routing" "Failed to create TPROXY policy rule."
-			while ip -4 route del local default dev lo table "$tproxy_route_table" >/dev/null 2>&1; do :; done
+		fi
+		if [ "$ipv6_proxy" -eq 1 ] && ! add_tproxy_policy_route 6 "$tproxy_fw_mark" "$tproxy_fw_mask" "$tproxy_rule_pref" "$tproxy_route_table"; then
+			log "Routing" "Failed to create IPv6 TPROXY policy route."
+			remove_tproxy_policy_route 4 "$tproxy_fw_mark" "$tproxy_fw_mask" "$tproxy_rule_pref" "$tproxy_route_table"
 			return 1
-		}
+		fi
 	fi
 
 	# Some vendor kernels load br_netfilter and process routed bridge frames
-	# twice. Preserve the previous value and restore it on stop.
-	if [ "$ipv4_proxy" -eq 1 ] && [ "$udp_mode" = tproxy ] && lsmod | grep -q '^br_netfilter'; then
-		local bridge_nf_call_iptables
-		bridge_nf_call_iptables="$(sysctl -e -n net.bridge.bridge-nf-call-iptables 2>/dev/null)"
-		if [ "$bridge_nf_call_iptables" = 1 ]; then
-			touch "$BRIDGE_NF_CALL_IPTABLES_FLAG_PATH"
-			sysctl -q -w net.bridge.bridge-nf-call-iptables=0
+	# twice. Preserve each sysctl independently and restore it on stop.
+	if [ "$udp_mode" = tproxy ] && lsmod | grep -q '^br_netfilter'; then
+		local bridge_nf_call_iptables bridge_nf_call_ip6tables
+		if [ "$ipv4_proxy" -eq 1 ]; then
+			bridge_nf_call_iptables="$(sysctl -e -n net.bridge.bridge-nf-call-iptables 2>/dev/null)"
+			if [ "$bridge_nf_call_iptables" = 1 ]; then
+				touch "$BRIDGE_NF_CALL_IPTABLES_FLAG_PATH"
+				sysctl -q -w net.bridge.bridge-nf-call-iptables=0
+			fi
+		fi
+		if [ "$ipv6_proxy" -eq 1 ]; then
+			bridge_nf_call_ip6tables="$(sysctl -e -n net.bridge.bridge-nf-call-ip6tables 2>/dev/null)"
+			if [ "$bridge_nf_call_ip6tables" = 1 ]; then
+				touch "$BRIDGE_NF_CALL_IP6TABLES_FLAG_PATH"
+				sysctl -q -w net.bridge.bridge-nf-call-ip6tables=0
+			fi
 		fi
 	fi
 
 	if "$FIREWALL_FW3_SH" apply; then
-		log "Proxy" "IPv4 firewall3 hijack is active (TCP=$tcp_mode, UDP=$udp_mode)."
+		log "Proxy" "Firewall3 hijack is active (IPv4=$ipv4_proxy, IPv6=$ipv6_proxy, TCP=$tcp_mode, UDP=$udp_mode)."
 	else
-		log "Proxy" "Failed to apply firewall3/iptables rules."
-		while ip -4 rule del pref "$tproxy_rule_pref" fwmark "$tproxy_fw_mark/$tproxy_fw_mask" table "$tproxy_route_table" >/dev/null 2>&1; do :; done
-		while ip -4 route del local default dev lo table "$tproxy_route_table" >/dev/null 2>&1; do :; done
+		log "Proxy" "Failed to apply firewall3/xtables rules."
+		remove_tproxy_policy_route 4 "$tproxy_fw_mark" "$tproxy_fw_mask" "$tproxy_rule_pref" "$tproxy_route_table"
+		remove_tproxy_policy_route 6 "$tproxy_fw_mark" "$tproxy_fw_mask" "$tproxy_rule_pref" "$tproxy_route_table"
+		if rm -f "$BRIDGE_NF_CALL_IPTABLES_FLAG_PATH" 2>/dev/null; then
+			sysctl -q -w net.bridge.bridge-nf-call-iptables=1 >/dev/null 2>&1
+		fi
+		if rm -f "$BRIDGE_NF_CALL_IP6TABLES_FLAG_PATH" 2>/dev/null; then
+			sysctl -q -w net.bridge.bridge-nf-call-ip6tables=1 >/dev/null 2>&1
+		fi
 		return 1
 	fi
 }
@@ -392,12 +422,15 @@ cleanup() {
 	config_get tproxy_route_table routing tproxy_route_table 80
 
 	[ -x "$FIREWALL_FW3_SH" ] && "$FIREWALL_FW3_SH" remove >/dev/null 2>&1
-	while ip -4 rule del pref "$tproxy_rule_pref" fwmark "$tproxy_fw_mark/$tproxy_fw_mask" table "$tproxy_route_table" >/dev/null 2>&1; do :; done
-	while ip -4 route del local default dev lo table "$tproxy_route_table" >/dev/null 2>&1; do :; done
+	remove_tproxy_policy_route 4 "$tproxy_fw_mark" "$tproxy_fw_mask" "$tproxy_rule_pref" "$tproxy_route_table"
+	remove_tproxy_policy_route 6 "$tproxy_fw_mark" "$tproxy_fw_mask" "$tproxy_rule_pref" "$tproxy_route_table"
 
 	rm -f "$STARTED_FLAG_PATH"
 	if rm -f "$BRIDGE_NF_CALL_IPTABLES_FLAG_PATH" 2>/dev/null; then
 		sysctl -q -w net.bridge.bridge-nf-call-iptables=1 >/dev/null 2>&1
+	fi
+	if rm -f "$BRIDGE_NF_CALL_IP6TABLES_FLAG_PATH" 2>/dev/null; then
+		sysctl -q -w net.bridge.bridge-nf-call-ip6tables=1 >/dev/null 2>&1
 	fi
 
 	sed -i "/#nikki/d" /etc/crontabs/root >/dev/null 2>&1

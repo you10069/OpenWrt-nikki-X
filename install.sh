@@ -6,8 +6,8 @@ if ! command -v opkg >/dev/null 2>&1; then
 	echo "This helper supports opkg-based OpenWrt only." >&2
 	exit 1
 fi
-if ! command -v fw3 >/dev/null 2>&1 || ! command -v iptables >/dev/null 2>&1; then
-	echo "firewall3/fw3 and iptables are required." >&2
+if ! command -v fw3 >/dev/null 2>&1 || ! command -v iptables >/dev/null 2>&1 || ! command -v ip6tables >/dev/null 2>&1; then
+	echo "firewall3/fw3, iptables and ip6tables are required." >&2
 	exit 1
 fi
 

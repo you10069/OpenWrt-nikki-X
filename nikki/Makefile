@@ -1,7 +1,7 @@
 include $(TOPDIR)/rules.mk
 
 PKG_NAME:=nikki
-PKG_VERSION:=2026.04.08.legacy1
+PKG_VERSION:=2026.04.08.legacy2
 PKG_RELEASE:=1
 PKGARCH:=all
 
@@ -13,16 +13,16 @@ include $(INCLUDE_DIR)/package.mk
 define Package/nikki
   SECTION:=net
   CATEGORY:=Network
-  TITLE:=Nikki legacy transparent proxy for firewall3/iptables
+  TITLE:=Nikki legacy transparent proxy for firewall3/xtables
   URL:=https://github.com/nikkinikki-org/OpenWrt-nikki
-  DEPENDS:=+ca-bundle +curl +yq +firewall +iptables +ipset +ip-full \
+  DEPENDS:=+ca-bundle +curl +yq +firewall +iptables +ip6tables +ip6tables-mod-nat +ipset +ip-full \
     +iptables-mod-tproxy +iptables-mod-extra +iptables-mod-ipopt \
     +kmod-ipt-ipset +kmod-tun +mihomo
 endef
 
 define Package/nikki/description
-  A firewall3/iptables-oriented Nikki fork for OpenWrt 21.02-class systems.
-  The initial backend supports IPv4 TCP REDIRECT, UDP TPROXY, DNS hijacking,
+  A firewall3/xtables-oriented Nikki fork for OpenWrt 21.02-class systems.
+  The backend supports IPv4/IPv6 TCP REDIRECT, UDP TPROXY, DNS hijacking,
   router/LAN access control and ipset-based bypass rules without ucode.
 endef
 
@@ -44,6 +44,7 @@ define Package/nikki/install
 
 	$(INSTALL_DATA) $(CURDIR)/files/mixin.yaml $(1)/etc/nikki/mixin.yaml
 	$(INSTALL_DATA) $(CURDIR)/files/ipset/geoip_cn.txt $(1)/etc/nikki/ipset/geoip_cn.txt
+	$(INSTALL_DATA) $(CURDIR)/files/ipset/geoip6_cn.txt $(1)/etc/nikki/ipset/geoip6_cn.txt
 
 	$(INSTALL_BIN) $(CURDIR)/files/scripts/include.sh $(1)/etc/nikki/scripts/include.sh
 	$(INSTALL_BIN) $(CURDIR)/files/scripts/mixin.sh $(1)/etc/nikki/scripts/mixin.sh

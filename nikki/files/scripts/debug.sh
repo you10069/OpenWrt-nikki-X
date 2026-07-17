@@ -10,8 +10,8 @@ cat <<'EOF_HEAD'
 ## Build scope
 
 ```text
-OpenWrt 21.02-class firewall3/iptables backend
-IPv4 TCP REDIRECT + UDP TPROXY
+OpenWrt 21.02-class firewall3/xtables backend
+IPv4/IPv6 TCP REDIRECT + UDP TPROXY
 ```
 
 ## System
@@ -35,7 +35,7 @@ cat <<'EOF_APP'
 ```text
 EOF_APP
 opkg list-installed 'nikki' 'luci-app-nikki' 'mihomo-*' 2>/dev/null
-opkg list-installed 'firewall' 'iptables*' 'ipset' 'ip-full' 2>/dev/null
+opkg list-installed 'firewall' 'iptables*' 'ip6tables*' 'ipset' 'ip-full' 2>/dev/null
 cat <<'EOF_CONFIG'
 ```
 
@@ -61,30 +61,40 @@ if [ -r "$RUN_PROFILE_PATH" ]; then
 		.authentication = []
 	' "$RUN_PROFILE_PATH" 2>/dev/null
 fi
-cat <<'EOF_RULES'
+cat <<'EOF_RULES4'
 ```
 
-## IPv4 policy rules
+## IPv4 policy rules and route table
 
 ```text
-EOF_RULES
+EOF_RULES4
 ip -4 rule list
-cat <<'EOF_ROUTE'
+ip -4 route list table "$(uci -q get nikki.routing.tproxy_route_table || echo 80)" 2>/dev/null
+cat <<'EOF_RULES6'
 ```
 
-## TPROXY route table
+## IPv6 policy rules and route table
 
 ```text
-EOF_ROUTE
-ip -4 route list table "$(uci -q get nikki.routing.tproxy_route_table || echo 80)" 2>/dev/null
+EOF_RULES6
+ip -6 rule list
+ip -6 route list table "$(uci -q get nikki.routing.tproxy_route_table || echo 80)" 2>/dev/null
 cat <<'EOF_IPTABLES'
 ```
 
-## Nikki iptables rules
+## Nikki IPv4 iptables rules
 
 ```text
 EOF_IPTABLES
 iptables-save 2>/dev/null | grep -E '(^\*|^:NIK_|NIK_)'
+cat <<'EOF_IP6TABLES'
+```
+
+## Nikki IPv6 ip6tables rules
+
+```text
+EOF_IP6TABLES
+ip6tables-save 2>/dev/null | grep -E '(^\*|^:NIK_|NIK_)'
 cat <<'EOF_IPSET'
 ```
 
@@ -92,7 +102,7 @@ cat <<'EOF_IPSET'
 
 ```text
 EOF_IPSET
-for set_name in nik_reserved_v4 nik_china_v4; do
+for set_name in nik_reserved_v4 nik_china_v4 nik_reserved_v6 nik_china_v6; do
 	ipset list "$set_name" 2>/dev/null
 done
 cat <<'EOF_MODULES'
@@ -102,10 +112,13 @@ cat <<'EOF_MODULES'
 
 ```text
 EOF_MODULES
-iptables -j TPROXY -h >/dev/null 2>&1 && echo 'TPROXY: available' || echo 'TPROXY: missing'
-iptables -m owner -h >/dev/null 2>&1 && echo 'owner: available' || echo 'owner: missing'
-iptables -m set -h >/dev/null 2>&1 && echo 'set: available' || echo 'set: missing'
-iptables -m dscp -h >/dev/null 2>&1 && echo 'dscp: available' || echo 'dscp: missing'
+for cmd in iptables ip6tables; do
+	"$cmd" -t mangle -j TPROXY -h >/dev/null 2>&1 && echo "$cmd TPROXY: available" || echo "$cmd TPROXY: missing"
+	"$cmd" -m owner -h >/dev/null 2>&1 && echo "$cmd owner: available" || echo "$cmd owner: missing"
+	"$cmd" -m set -h >/dev/null 2>&1 && echo "$cmd set: available" || echo "$cmd set: missing"
+	"$cmd" -m dscp -h >/dev/null 2>&1 && echo "$cmd dscp: available" || echo "$cmd dscp: missing"
+done
+ip6tables -t nat -j REDIRECT -h >/dev/null 2>&1 && echo 'ip6tables REDIRECT/NAT: available' || echo 'ip6tables REDIRECT/NAT: missing'
 cat <<'EOF_SERVICE'
 ```
 

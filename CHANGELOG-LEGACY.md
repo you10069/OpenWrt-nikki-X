@@ -1,5 +1,16 @@
 # Nikki Legacy changelog
 
+## 2026.04.08.legacy2
+
+- Added IPv6 TCP REDIRECT, UDP TPROXY and router/LAN DNS hijacking through ip6tables.
+- Added `NIK_NAT_*_V6` and `NIK_MGL_*_V6` chains with the same layout as IPv4.
+- Added IPv6 policy routing for router-originated UDP and independent bridge netfilter restoration.
+- Added `family inet6` reserved/China ipsets and packaged `geoip6_cn.txt`.
+- Added IPv6 LAN ACL selectors and fixed cross-family selector fallback behavior.
+- Added LuCI IPv6 proxy, DNS, ACL, bypass and reserved-address controls.
+- Added `ip6tables` and `ip6tables-mod-nat` dependencies.
+- Expanded debug output and regression tests for dual-stack rule generation.
+
 ## 2026.04.08.legacy1
 
 - Replaced `mixin.uc` with `mixin.sh` using OpenWrt `jshn` and `yq`.

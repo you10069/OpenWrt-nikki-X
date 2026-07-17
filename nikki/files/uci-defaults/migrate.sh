@@ -229,17 +229,15 @@ log_scheduled_clear_size_limit_unit=$(uci -q get nikki.log.scheduled_clear_size_
 
 config_clear_at_stop=$(uci -q get nikki.log.clear_at_stop); [ -z "$config_clear_at_stop" ] && uci set nikki.log.clear_at_stop=1
 
-# Nikki Legacy v1 (firewall3/iptables, IPv4)
+# Nikki Legacy v1/v2 (firewall3/xtables)
 
 routing_core_fw_mark=$(uci -q get nikki.routing.core_fw_mark); [ -z "$routing_core_fw_mark" ] && uci set nikki.routing.core_fw_mark=0x82
 routing_core_fw_mask=$(uci -q get nikki.routing.core_fw_mask); [ -z "$routing_core_fw_mask" ] && uci set nikki.routing.core_fw_mask=0xFF
 
-# Older Nikki defaults listened on IPv6 wildcard sockets. Keep existing custom
-# addresses, but normalize the standard wildcard defaults for the IPv4 backend.
-mixin_api_listen=$(uci -q get nikki.mixin.api_listen)
-[ "$mixin_api_listen" = '[::]:9090' ] && uci set nikki.mixin.api_listen='0.0.0.0:9090'
+# Legacy v2 supports IPv6 DNS hijacking. Migrate only the exact v1 wildcard
+# default; preserve every explicitly customized listen address.
 mixin_dns_listen=$(uci -q get nikki.mixin.dns_listen)
-[ "$mixin_dns_listen" = '[::]:1053' ] && uci set nikki.mixin.dns_listen='0.0.0.0:1053'
+[ "$mixin_dns_listen" = '0.0.0.0:1053' ] && uci set nikki.mixin.dns_listen='[::]:1053'
 
 # commit
 uci commit nikki
