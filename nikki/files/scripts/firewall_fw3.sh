@@ -1,8 +1,10 @@
 #!/bin/sh
 
 # Nikki legacy firewall3/xtables backend.
-# Supported data plane: IPv4 + IPv6, TCP REDIRECT, UDP TPROXY,
-# router/LAN DNS hijack and access control.
+# Supported data plane:
+# - IPv4: TCP REDIRECT, UDP TPROXY and NAT DNS hijack.
+# - IPv6: TCP/UDP/DNS use TPROXY only (no ip6tables nat table).
+# - Router/LAN access control for both address families.
 
 . /lib/functions.sh
 . /etc/nikki/scripts/include.sh
@@ -28,10 +30,6 @@ MGL_PRE_CTRL_V4="NIK_MGL_PRE_CTRL_V4"
 MGL_PRE_TPROXY_V4="NIK_MGL_PRE_TPROXY_V4"
 MGL_OUT_MARK_V4="NIK_MGL_OUT_MARK_V4"
 
-NAT_PRE_DNS_V6="NIK_NAT_PRE_DNS_V6"
-NAT_PRE_TCP_V6="NIK_NAT_PRE_TCP_V6"
-NAT_OUT_DNS_V6="NIK_NAT_OUT_DNS_V6"
-NAT_OUT_TCP_V6="NIK_NAT_OUT_TCP_V6"
 MGL_PRE_CTRL_V6="NIK_MGL_PRE_CTRL_V6"
 MGL_PRE_TPROXY_V6="NIK_MGL_PRE_TPROXY_V6"
 MGL_OUT_MARK_V6="NIK_MGL_OUT_MARK_V6"
@@ -88,12 +86,6 @@ extract_listen_port() {
 	printf '%s\n' "$1" | sed -n 's/^.*:\([0-9][0-9]*\)$/\1/p; t; /^[0-9][0-9]*$/p'
 }
 
-dns_listener_supports_ipv6() {
-	case "$1" in
-		\[*\]:[0-9]*|:[0-9]*|[0-9]*) return 0 ;;
-		*) return 1 ;;
-	esac
-}
 
 # Resolve only listeners required by enabled address families and modes.
 load_ports() {
@@ -105,25 +97,26 @@ load_ports() {
 	config_get redirect_listener core redirect_listener_name redir-in
 	config_get tproxy_listener core tproxy_listener_name tproxy-in
 
-	if { [ "$IPV4_PROXY" -eq 1 ] || [ "$IPV6_PROXY" -eq 1 ]; } && [ "$TCP_MODE" = redirect ]; then
+	# IPv4 TCP uses the legacy REDIRECT listener. IPv6 never uses REDIRECT.
+	if [ "$IPV4_PROXY" -eq 1 ] && [ "$TCP_MODE" = redirect ]; then
 		REDIR_PORT="$(REDIRECT_LISTENER="$redirect_listener" yq -M -r '."redir-port" // (.listeners[]? | select(.name == env(REDIRECT_LISTENER) and .type == "redir") | .port) // ""' "$RUN_PROFILE_PATH" 2>/dev/null)"
 		valid_port "$REDIR_PORT" || return 1
 	fi
 
-	if { [ "$IPV4_PROXY" -eq 1 ] || [ "$IPV6_PROXY" -eq 1 ]; } && [ "$UDP_MODE" = tproxy ]; then
+	# IPv4 UDP and every IPv6 interception path use the TPROXY listener.
+	if { [ "$IPV4_PROXY" -eq 1 ] && [ "$UDP_MODE" = tproxy ]; } || \
+	   [ "$IPV6_TPROXY_ACTIVE" -eq 1 ]; then
 		TPROXY_PORT="$(TPROXY_LISTENER="$tproxy_listener" yq -M -r '."tproxy-port" // (.listeners[]? | select(.name == env(TPROXY_LISTENER) and .type == "tproxy") | .port) // ""' "$RUN_PROFILE_PATH" 2>/dev/null)"
 		valid_port "$TPROXY_PORT" || return 1
 	fi
 
-	if [ "$IPV4_DNS_HIJACK" -eq 1 ] || [ "$IPV6_DNS_HIJACK" -eq 1 ]; then
+	# Only IPv4 DNS uses REDIRECT to Mihomo's DNS listener. IPv6 DNS is
+	# intercepted through the TPROXY listener together with other IPv6 traffic.
+	if [ "$IPV4_DNS_HIJACK" -eq 1 ]; then
 		dns_listen="$(yq -M -r '.dns.listen // ""' "$RUN_PROFILE_PATH" 2>/dev/null)"
 		DNS_LISTEN="$dns_listen"
 		DNS_PORT="$(extract_listen_port "$dns_listen")"
 		valid_port "$DNS_PORT" || return 1
-		if [ "$IPV6_DNS_HIJACK" -eq 1 ] && ! dns_listener_supports_ipv6 "$dns_listen"; then
-			log "Firewall" "IPv6 DNS hijack requires an IPv6-capable DNS listen address (for example [::]:1053)."
-			return 1
-		fi
 	fi
 	return 0
 }
@@ -246,27 +239,35 @@ remove_chain() {
 	"$cmd" -t "$table" -X "$chain" >/dev/null 2>&1
 }
 
-remove_family_rules() {
-	local cmd="$1" nat_pre_dns="$2" nat_pre_tcp="$3" nat_out_dns="$4" nat_out_tcp="$5" mgl_pre_ctrl="$6" mgl_pre_tproxy="$7" mgl_out_mark="$8"
-	remove_jump "$cmd" nat PREROUTING "$nat_pre_dns"
-	remove_jump "$cmd" nat PREROUTING "$nat_pre_tcp"
-	remove_jump "$cmd" nat OUTPUT "$nat_out_dns"
-	remove_jump "$cmd" nat OUTPUT "$nat_out_tcp"
-	remove_jump "$cmd" mangle PREROUTING "$mgl_pre_ctrl"
-	remove_jump "$cmd" mangle OUTPUT "$mgl_out_mark"
+remove_ipv4_rules() {
+	remove_jump "$IPT4" nat PREROUTING "$NAT_PRE_DNS_V4"
+	remove_jump "$IPT4" nat PREROUTING "$NAT_PRE_TCP_V4"
+	remove_jump "$IPT4" nat OUTPUT "$NAT_OUT_DNS_V4"
+	remove_jump "$IPT4" nat OUTPUT "$NAT_OUT_TCP_V4"
+	remove_jump "$IPT4" mangle PREROUTING "$MGL_PRE_CTRL_V4"
+	remove_jump "$IPT4" mangle OUTPUT "$MGL_OUT_MARK_V4"
 
-	remove_chain "$cmd" nat "$nat_pre_dns"
-	remove_chain "$cmd" nat "$nat_pre_tcp"
-	remove_chain "$cmd" nat "$nat_out_dns"
-	remove_chain "$cmd" nat "$nat_out_tcp"
-	remove_chain "$cmd" mangle "$mgl_pre_ctrl"
-	remove_chain "$cmd" mangle "$mgl_pre_tproxy"
-	remove_chain "$cmd" mangle "$mgl_out_mark"
+	remove_chain "$IPT4" nat "$NAT_PRE_DNS_V4"
+	remove_chain "$IPT4" nat "$NAT_PRE_TCP_V4"
+	remove_chain "$IPT4" nat "$NAT_OUT_DNS_V4"
+	remove_chain "$IPT4" nat "$NAT_OUT_TCP_V4"
+	remove_chain "$IPT4" mangle "$MGL_PRE_CTRL_V4"
+	remove_chain "$IPT4" mangle "$MGL_PRE_TPROXY_V4"
+	remove_chain "$IPT4" mangle "$MGL_OUT_MARK_V4"
+}
+
+remove_ipv6_rules() {
+	# IPv6 is deliberately mangle/TPROXY-only. Never touch an ip6tables nat table.
+	remove_jump "$IPT6" mangle PREROUTING "$MGL_PRE_CTRL_V6"
+	remove_jump "$IPT6" mangle OUTPUT "$MGL_OUT_MARK_V6"
+	remove_chain "$IPT6" mangle "$MGL_PRE_CTRL_V6"
+	remove_chain "$IPT6" mangle "$MGL_PRE_TPROXY_V6"
+	remove_chain "$IPT6" mangle "$MGL_OUT_MARK_V6"
 }
 
 remove_rules_only() {
-	remove_family_rules "$IPT4" "$NAT_PRE_DNS_V4" "$NAT_PRE_TCP_V4" "$NAT_OUT_DNS_V4" "$NAT_OUT_TCP_V4" "$MGL_PRE_CTRL_V4" "$MGL_PRE_TPROXY_V4" "$MGL_OUT_MARK_V4"
-	remove_family_rules "$IPT6" "$NAT_PRE_DNS_V6" "$NAT_PRE_TCP_V6" "$NAT_OUT_DNS_V6" "$NAT_OUT_TCP_V6" "$MGL_PRE_CTRL_V6" "$MGL_PRE_TPROXY_V6" "$MGL_OUT_MARK_V6"
+	remove_ipv4_rules
+	remove_ipv6_rules
 }
 
 remove_all() {
@@ -418,6 +419,31 @@ _emit_lan_proxy_target() {
 				rule "-A $LAN_CHAIN $base -p udp -j RETURN"
 			fi
 			;;
+		v6_dns)
+			if [ "$dns" -eq 1 ]; then
+				rule "-A $LAN_CHAIN $base -p udp --dport 53 -j $MGL_PRE_TPROXY"
+				rule "-A $LAN_CHAIN $base -p tcp --dport 53 -j $MGL_PRE_TPROXY"
+			else
+				rule "-A $LAN_CHAIN $base -p udp --dport 53 -j RETURN"
+				rule "-A $LAN_CHAIN $base -p tcp --dport 53 -j RETURN"
+			fi
+			;;
+		v6_tcp)
+			if [ "$proxy" -eq 1 ]; then
+				emit_port_action "$LAN_CHAIN" "$base -p tcp" "-j $MGL_PRE_TPROXY"
+				rule "-A $LAN_CHAIN $base -p tcp -j RETURN"
+			else
+				rule "-A $LAN_CHAIN $base -p tcp -j RETURN"
+			fi
+			;;
+		v6_udp)
+			if [ "$proxy" -eq 1 ]; then
+				emit_port_action "$LAN_CHAIN" "$base -p udp" "-j $MGL_PRE_TPROXY"
+				rule "-A $LAN_CHAIN $base -p udp -j RETURN"
+			else
+				rule "-A $LAN_CHAIN $base -p udp -j RETURN"
+			fi
+			;;
 	esac
 }
 
@@ -485,6 +511,33 @@ _emit_router_target() {
 				rule "-A $RTR_CHAIN $base -p udp -j RETURN"
 			fi
 			;;
+		v6_dns)
+			if [ "$RTR_DNS" -eq 1 ]; then
+				rule "-A $RTR_CHAIN $base -p udp --dport 53 -j MARK --set-xmark $TPROXY_MARK/$TPROXY_MASK"
+				rule "-A $RTR_CHAIN $base -p udp --dport 53 -j RETURN"
+				rule "-A $RTR_CHAIN $base -p tcp --dport 53 -j MARK --set-xmark $TPROXY_MARK/$TPROXY_MASK"
+				rule "-A $RTR_CHAIN $base -p tcp --dport 53 -j RETURN"
+			else
+				rule "-A $RTR_CHAIN $base -p udp --dport 53 -j RETURN"
+				rule "-A $RTR_CHAIN $base -p tcp --dport 53 -j RETURN"
+			fi
+			;;
+		v6_tcp)
+			if [ "$RTR_PROXY" -eq 1 ]; then
+				emit_port_action "$RTR_CHAIN" "$base -p tcp" "-j MARK --set-xmark $TPROXY_MARK/$TPROXY_MASK"
+				rule "-A $RTR_CHAIN $base -p tcp -j RETURN"
+			else
+				rule "-A $RTR_CHAIN $base -p tcp -j RETURN"
+			fi
+			;;
+		v6_udp)
+			if [ "$RTR_PROXY" -eq 1 ]; then
+				emit_port_action "$RTR_CHAIN" "$base -p udp" "-j MARK --set-xmark $TPROXY_MARK/$TPROXY_MASK"
+				rule "-A $RTR_CHAIN $base -p udp -j RETURN"
+			else
+				rule "-A $RTR_CHAIN $base -p udp -j RETURN"
+			fi
+			;;
 	esac
 }
 
@@ -521,32 +574,26 @@ emit_router_acl() {
 	config_foreach _emit_router_acl_section router_access_control
 }
 
-select_family_context() {
-	case "$1" in
-		4)
-			RULES_FILE="$RULES_FILE_V4"
-			NAT_PRE_DNS="$NAT_PRE_DNS_V4"; NAT_PRE_TCP="$NAT_PRE_TCP_V4"
-			NAT_OUT_DNS="$NAT_OUT_DNS_V4"; NAT_OUT_TCP="$NAT_OUT_TCP_V4"
-			MGL_PRE_CTRL="$MGL_PRE_CTRL_V4"; MGL_PRE_TPROXY="$MGL_PRE_TPROXY_V4"; MGL_OUT_MARK="$MGL_OUT_MARK_V4"
-			SET_RESERVED="$SET_RESERVED_V4"; SET_CHINA="$SET_CHINA_V4"
-			FAMILY_PROXY="$IPV4_PROXY"; FAMILY_DNS="$IPV4_DNS_HIJACK"; BYPASS_CHINA="$BYPASS_CHINA_V4"
-			LAN_IP_OPTION="ip"; LAN_VALIDATE_FN="valid_ipv4_or_cidr"
-			;;
-		6)
-			RULES_FILE="$RULES_FILE_V6"
-			NAT_PRE_DNS="$NAT_PRE_DNS_V6"; NAT_PRE_TCP="$NAT_PRE_TCP_V6"
-			NAT_OUT_DNS="$NAT_OUT_DNS_V6"; NAT_OUT_TCP="$NAT_OUT_TCP_V6"
-			MGL_PRE_CTRL="$MGL_PRE_CTRL_V6"; MGL_PRE_TPROXY="$MGL_PRE_TPROXY_V6"; MGL_OUT_MARK="$MGL_OUT_MARK_V6"
-			SET_RESERVED="$SET_RESERVED_V6"; SET_CHINA="$SET_CHINA_V6"
-			FAMILY_PROXY="$IPV6_PROXY"; FAMILY_DNS="$IPV6_DNS_HIJACK"; BYPASS_CHINA="$BYPASS_CHINA_V6"
-			LAN_IP_OPTION="ip6"; LAN_VALIDATE_FN="valid_ipv6_or_cidr"
-			;;
-		*) return 1 ;;
-	esac
+select_ipv4_context() {
+	RULES_FILE="$RULES_FILE_V4"
+	NAT_PRE_DNS="$NAT_PRE_DNS_V4"; NAT_PRE_TCP="$NAT_PRE_TCP_V4"
+	NAT_OUT_DNS="$NAT_OUT_DNS_V4"; NAT_OUT_TCP="$NAT_OUT_TCP_V4"
+	MGL_PRE_CTRL="$MGL_PRE_CTRL_V4"; MGL_PRE_TPROXY="$MGL_PRE_TPROXY_V4"; MGL_OUT_MARK="$MGL_OUT_MARK_V4"
+	SET_RESERVED="$SET_RESERVED_V4"; SET_CHINA="$SET_CHINA_V4"
+	FAMILY_PROXY="$IPV4_PROXY"; FAMILY_DNS="$IPV4_DNS_HIJACK"; BYPASS_CHINA="$BYPASS_CHINA_V4"
+	LAN_IP_OPTION="ip"; LAN_VALIDATE_FN="valid_ipv4_or_cidr"
 }
 
-generate_family_rules() {
-	select_family_context "$1" || return 1
+select_ipv6_context() {
+	RULES_FILE="$RULES_FILE_V6"
+	MGL_PRE_CTRL="$MGL_PRE_CTRL_V6"; MGL_PRE_TPROXY="$MGL_PRE_TPROXY_V6"; MGL_OUT_MARK="$MGL_OUT_MARK_V6"
+	SET_RESERVED="$SET_RESERVED_V6"; SET_CHINA="$SET_CHINA_V6"
+	FAMILY_PROXY="$IPV6_PROXY"; FAMILY_DNS="$IPV6_DNS_HIJACK"; BYPASS_CHINA="$BYPASS_CHINA_V6"
+	LAN_IP_OPTION="ip6"; LAN_VALIDATE_FN="valid_ipv6_or_cidr"
+}
+
+generate_ipv4_rules() {
+	select_ipv4_context
 	: > "$RULES_FILE"
 	cat >> "$RULES_FILE" <<-EOF_RULES
 	*nat
@@ -617,6 +664,76 @@ generate_family_rules() {
 	rule COMMIT
 }
 
+generate_ipv6_rules() {
+	select_ipv6_context
+	: > "$RULES_FILE"
+	cat >> "$RULES_FILE" <<-EOF_RULES
+	*mangle
+	:$MGL_PRE_CTRL - [0:0]
+	:$MGL_PRE_TPROXY - [0:0]
+	:$MGL_OUT_MARK - [0:0]
+	EOF_RULES
+
+	# IPv6 has no NAT/REDIRECT backend in the target legacy environment.
+	# TCP, UDP and DNS are all delivered through the same TPROXY listener.
+	if [ "$FAMILY_PROXY" -eq 1 ] || [ "$FAMILY_DNS" -eq 1 ]; then
+		[ "$LAN_PROXY_ENABLED" -eq 1 ] && rule "-I PREROUTING 1 -j $MGL_PRE_CTRL"
+		[ "$ROUTER_PROXY" -eq 1 ] && rule "-I OUTPUT 1 -j $MGL_OUT_MARK"
+		rule "-A $MGL_PRE_TPROXY -p tcp -j TPROXY --on-port $TPROXY_PORT --tproxy-mark $TPROXY_MARK/$TPROXY_MASK"
+		rule "-A $MGL_PRE_TPROXY -p udp -j TPROXY --on-port $TPROXY_PORT --tproxy-mark $TPROXY_MARK/$TPROXY_MASK"
+
+		# Locally generated IPv6 packets are marked in OUTPUT, routed to lo and
+		# then intercepted here on their second pass through PREROUTING.
+		if [ "$ROUTER_PROXY" -eq 1 ]; then
+			rule "-A $MGL_PRE_CTRL -i lo -p tcp -m mark --mark $TPROXY_MARK/$TPROXY_MASK -j $MGL_PRE_TPROXY"
+			rule "-A $MGL_PRE_CTRL -i lo -p udp -m mark --mark $TPROXY_MARK/$TPROXY_MASK -j $MGL_PRE_TPROXY"
+		fi
+
+		if [ "$LAN_PROXY_ENABLED" -eq 1 ]; then
+			for dev in $LAN_DEVICES; do
+				# DNS control must precede LOCAL/reserved bypass checks because clients
+				# commonly send DNS to the router's own IPv6 address.
+				[ "$FAMILY_DNS" -eq 1 ] && emit_lan_acl "$MGL_PRE_CTRL" "$dev" v6_dns
+				if [ "$FAMILY_PROXY" -eq 1 ] && [ "$TCP_MODE" = redirect ]; then
+					emit_common_bypass "$MGL_PRE_CTRL" "-i $dev -p tcp"
+					normalize_port_tokens "$PROXY_TCP_DPORT"
+					emit_lan_acl "$MGL_PRE_CTRL" "$dev" v6_tcp
+				fi
+				if [ "$FAMILY_PROXY" -eq 1 ] && [ "$UDP_MODE" = tproxy ]; then
+					emit_common_bypass "$MGL_PRE_CTRL" "-i $dev -p udp"
+					normalize_port_tokens "$PROXY_UDP_DPORT"
+					emit_lan_acl "$MGL_PRE_CTRL" "$dev" v6_udp
+				fi
+			done
+		fi
+
+		if [ "$ROUTER_PROXY" -eq 1 ]; then
+			# Never recapture Mihomo's own marked connections.
+			rule "-A $MGL_OUT_MARK -m mark --mark $CORE_MARK/$CORE_MASK -j RETURN"
+			[ "$FAMILY_DNS" -eq 1 ] && emit_router_acl "$MGL_OUT_MARK" v6_dns
+			if [ "$FAMILY_PROXY" -eq 1 ] && [ "$TCP_MODE" = redirect ]; then
+				emit_common_bypass "$MGL_OUT_MARK" "-p tcp"
+				normalize_port_tokens "$PROXY_TCP_DPORT"
+				emit_router_acl "$MGL_OUT_MARK" v6_tcp
+			fi
+			if [ "$FAMILY_PROXY" -eq 1 ] && [ "$UDP_MODE" = tproxy ]; then
+				emit_common_bypass "$MGL_OUT_MARK" "-p udp"
+				normalize_port_tokens "$PROXY_UDP_DPORT"
+				emit_router_acl "$MGL_OUT_MARK" v6_udp
+			fi
+		fi
+	fi
+	rule COMMIT
+}
+
+generate_family_rules() {
+	case "$1" in
+		4) generate_ipv4_rules ;;
+		6) generate_ipv6_rules ;;
+		*) return 1 ;;
+	esac
+}
+
 load_config() {
 	config_load nikki
 	config_get_bool PROXY_ENABLED proxy enabled 0
@@ -638,6 +755,12 @@ load_config() {
 	config_get CORE_MARK routing core_fw_mark 0x82
 	config_get CORE_MASK routing core_fw_mask 0xFF
 
+	IPV6_TPROXY_ACTIVE=0
+	if [ "$IPV6_DNS_HIJACK" -eq 1 ] || \
+	   { [ "$IPV6_PROXY" -eq 1 ] && { [ "$TCP_MODE" = redirect ] || [ "$UDP_MODE" = tproxy ]; }; }; then
+		IPV6_TPROXY_ACTIVE=1
+	fi
+
 	LAN_DEVICES=""
 	config_list_foreach proxy lan_inbound_interface _add_lan_device
 }
@@ -645,7 +768,7 @@ load_config() {
 family_enabled() {
 	case "$1" in
 		4) [ "$IPV4_PROXY" -eq 1 ] || [ "$IPV4_DNS_HIJACK" -eq 1 ] ;;
-		6) [ "$IPV6_PROXY" -eq 1 ] || [ "$IPV6_DNS_HIJACK" -eq 1 ] ;;
+		6) [ "$IPV6_TPROXY_ACTIVE" -eq 1 ] ;;
 	esac
 }
 
@@ -653,7 +776,7 @@ check_family_backend() {
 	local family="$1" cmd restore proxy dns
 	case "$family" in
 		4) cmd="$IPT4"; restore="$IPT4_RESTORE"; proxy="$IPV4_PROXY"; dns="$IPV4_DNS_HIJACK" ;;
-		6) cmd="$IPT6"; restore="$IPT6_RESTORE"; proxy="$IPV6_PROXY"; dns="$IPV6_DNS_HIJACK" ;;
+		6) cmd="$IPT6"; restore="$IPT6_RESTORE"; proxy="$IPV6_TPROXY_ACTIVE"; dns=0 ;;
 		*) return 1 ;;
 	esac
 	[ "$proxy" -eq 1 ] || [ "$dns" -eq 1 ] || return 0
@@ -661,11 +784,17 @@ check_family_backend() {
 	command_exists "$restore" || return 1
 	"$cmd" -m owner -h >/dev/null 2>&1 || return 1
 	"$cmd" -m set -h >/dev/null 2>&1 || return 1
-	if [ "$proxy" -eq 1 ] && [ "$UDP_MODE" = tproxy ]; then
+
+	if [ "$family" = 6 ]; then
+		# The legacy IPv6 backend is TPROXY-only, including TCP and DNS.
 		"$cmd" -t mangle -j TPROXY -h >/dev/null 2>&1 || return 1
-	fi
-	if [ "$dns" -eq 1 ] || { [ "$proxy" -eq 1 ] && [ "$TCP_MODE" = redirect ]; }; then
-		"$cmd" -t nat -j REDIRECT -h >/dev/null 2>&1 || return 1
+	else
+		if [ "$proxy" -eq 1 ] && [ "$UDP_MODE" = tproxy ]; then
+			"$cmd" -t mangle -j TPROXY -h >/dev/null 2>&1 || return 1
+		fi
+		if [ "$dns" -eq 1 ] || { [ "$proxy" -eq 1 ] && [ "$TCP_MODE" = redirect ]; }; then
+			"$cmd" -t nat -j REDIRECT -h >/dev/null 2>&1 || return 1
+		fi
 	fi
 	return 0
 }

@@ -1,6 +1,15 @@
 # Nikki Legacy changelog
 
-## 2026.04.08.legacy2
+## 2026.04.08.legacy3
+
+- Removed every IPv6 nat/REDIRECT rule and all `NIK_NAT_*_V6` chains.
+- Reworked IPv6 TCP, UDP and port-53 DNS interception to use mangle/TPROXY only.
+- Added IPv6 router OUTPUT marking and policy routing for TCP, UDP and DNS, not only UDP.
+- Removed the `ip6tables-mod-nat` dependency and all runtime checks for an IPv6 REDIRECT target.
+- Updated LuCI descriptions, debug output and documentation to state the asymmetric IPv4/IPv6 data paths.
+- Added regression checks that fail if the IPv6 rules contain `*nat`, `REDIRECT`, `NIK_NAT_*_V6`, or any `ip6tables -t nat` access.
+
+## 2026.04.08.legacy2 (superseded by legacy3)
 
 - Added IPv6 TCP REDIRECT, UDP TPROXY and router/LAN DNS hijacking through ip6tables.
 - Added `NIK_NAT_*_V6` and `NIK_MGL_*_V6` chains with the same layout as IPv4.

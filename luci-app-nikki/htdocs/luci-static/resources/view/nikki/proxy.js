@@ -33,9 +33,9 @@ return view.extend({
         o.rmempty = false;
 
         o = s.taboption('proxy', form.DummyValue, '_legacy_scope', _('Legacy Backend'));
-        o.default = _('IPv4/IPv6: TCP Redirect + UDP TPROXY (firewall3/xtables)');
+        o.default = _('IPv4: TCP REDIRECT + UDP TPROXY; IPv6: TCP/UDP/DNS TPROXY only');
 
-        o = s.taboption('proxy', form.ListValue, 'tcp_mode', _('TCP Mode'));
+        o = s.taboption('proxy', form.ListValue, 'tcp_mode', _('TCP Mode'), _('This controls IPv4 TCP. IPv6 TCP always uses TPROXY when IPv6 proxy is enabled.'));
         o.optional = true;
         o.placeholder = _('Disable');
         o.value('redirect', _('Redirect Mode'));
@@ -48,13 +48,13 @@ return view.extend({
         o = s.taboption('proxy', form.Flag, 'ipv4_dns_hijack', _('IPv4 DNS Hijack'));
         o.rmempty = false;
 
-        o = s.taboption('proxy', form.Flag, 'ipv6_dns_hijack', _('IPv6 DNS Hijack'));
+        o = s.taboption('proxy', form.Flag, 'ipv6_dns_hijack', _('IPv6 DNS Hijack'), _('Intercept IPv6 TCP/UDP port 53 through the TPROXY listener; no IPv6 NAT/REDIRECT is used.'));
         o.rmempty = false;
 
         o = s.taboption('proxy', form.Flag, 'ipv4_proxy', _('IPv4 Proxy'));
         o.rmempty = false;
 
-        o = s.taboption('proxy', form.Flag, 'ipv6_proxy', _('IPv6 Proxy'));
+        o = s.taboption('proxy', form.Flag, 'ipv6_proxy', _('IPv6 Proxy'), _('IPv6 TCP and UDP are both intercepted through TPROXY.'));
         o.rmempty = false;
 
         s.tab('router', _('Router Proxy'));

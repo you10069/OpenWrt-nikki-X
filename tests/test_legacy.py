@@ -339,10 +339,6 @@ log() {{ printf '[%s] %s\\n' "$1" "$2" >> "$APP_LOG_PATH"; }}
         "NIK_MGL_PRE_CTRL_V4",
         "NIK_MGL_PRE_TPROXY_V4",
         "NIK_MGL_OUT_MARK_V4",
-        "NIK_NAT_PRE_DNS_V6",
-        "NIK_NAT_PRE_TCP_V6",
-        "NIK_NAT_OUT_DNS_V6",
-        "NIK_NAT_OUT_TCP_V6",
         "NIK_MGL_PRE_CTRL_V6",
         "NIK_MGL_PRE_TPROXY_V6",
         "NIK_MGL_OUT_MARK_V6",
@@ -355,7 +351,16 @@ log() {{ printf '[%s] %s\\n' "$1" "$2" >> "$APP_LOG_PATH"; }}
     # iptables -I 1 reverses command order: emitting TCP before DNS leaves DNS first.
     assert rules.index("-I PREROUTING 1 -j NIK_NAT_PRE_TCP_V4") < rules.index("-I PREROUTING 1 -j NIK_NAT_PRE_DNS_V4")
     assert rules.index("-I OUTPUT 1 -j NIK_NAT_OUT_TCP_V4") < rules.index("-I OUTPUT 1 -j NIK_NAT_OUT_DNS_V4")
+    # IPv6 is mangle/TPROXY-only: no NIK_NAT chains or ip6tables nat section.
+    ipv6_rules = rules.split("# IPv6 / ip6tables-restore", 1)[1]
+    assert "*nat" not in ipv6_rules
+    assert "NIK_NAT_" not in ipv6_rules
+    assert "REDIRECT" not in ipv6_rules
     assert "-j TPROXY --on-port 7892 --tproxy-mark 0x80/0xFF" in rules
+    assert "NIK_MGL_PRE_TPROXY_V6 -p tcp -j TPROXY --on-port 7892" in rules
+    assert "NIK_MGL_PRE_TPROXY_V6 -p udp -j TPROXY --on-port 7892" in rules
+    assert "NIK_MGL_PRE_CTRL_V6 -i br-lan -s 2001:db8::10 -p tcp --dport 53 -j NIK_MGL_PRE_TPROXY_V6" in rules
+    assert "-p tcp --dport 53 -j MARK --set-xmark 0x80/0xFF" in ipv6_rules
     assert "-j REDIRECT --to-ports 7891" in rules
     assert "-j REDIRECT --to-ports 1053" in rules
     assert "--mac-source AA:BB:CC:DD:EE:FF" in rules
@@ -363,7 +368,7 @@ log() {{ printf '[%s] %s\\n' "$1" "$2" >> "$APP_LOG_PATH"; }}
     assert "-s 2001:db8::10" in rules
     # Family-specific selectors must not become wildcard rules in the other family.
     assert "NIK_NAT_PRE_TCP_V4 -i br-lan -s 2001:db8::10" not in rules
-    assert "NIK_NAT_PRE_TCP_V6 -i br-lan -s 192.0.2.10" not in rules
+    assert "NIK_MGL_PRE_CTRL_V6 -i br-lan -s 192.0.2.10" not in rules
     assert "--uid-owner root" in rules
     assert "--gid-owner root" in rules
     assert "--set-xmark 0x80/0xFF" in rules
@@ -377,6 +382,61 @@ log() {{ printf '[%s] %s\\n' "$1" "$2" >> "$APP_LOG_PATH"; }}
     assert not re.search(r"--(?:on-port|to-ports)\s*(?:$|\n)", rules)
 
 
+
+
+def test_ipv6_dns_only(tmp: Path, common: dict) -> None:
+    runtime = tmp / "runtime-v6-dns-only"
+    runtime.mkdir()
+    (runtime / "config.yaml").write_text("test: true\n")
+    include = tmp / "include-v6-dns-only.sh"
+    write(
+        include,
+        f"""#!/bin/sh
+TEMP_DIR="{runtime}"
+RUN_PROFILE_PATH="{runtime / 'config.yaml'}"
+APP_LOG_PATH="{runtime / 'app.log'}"
+prepare_files() {{ mkdir -p "$TEMP_DIR"; : > "$APP_LOG_PATH"; }}
+log() {{ :; }}
+""",
+    )
+
+    functions = tmp / "functions-v6-dns-only.sh"
+    functions_text = common["functions"].read_text()
+    functions_text = functions_text.replace("proxy.ipv4_proxy) _mock_value=1 ;;", "proxy.ipv4_proxy) _mock_value=0 ;;")
+    functions_text = functions_text.replace("proxy.ipv4_dns_hijack) _mock_value=1 ;;", "proxy.ipv4_dns_hijack) _mock_value=0 ;;")
+    functions_text = functions_text.replace("proxy.ipv6_proxy) _mock_value=1 ;;", "proxy.ipv6_proxy) _mock_value=0 ;;")
+    write(functions, functions_text)
+
+    bin_dir = tmp / "bin-v6-dns-only"
+    shutil.copytree(common["bin"], bin_dir)
+    write(
+        bin_dir / "yq",
+        """#!/bin/sh
+for arg in "$@"; do
+  case "$arg" in
+    *redir-port*|*.dns.listen*) echo 'unexpected non-TPROXY listener lookup' >&2; exit 88 ;;
+    *tproxy-port*) echo 7892; exit 0 ;;
+  esac
+done
+echo '{}'
+""",
+    )
+
+    script = tmp / "firewall-v6-dns-only.sh"
+    transformed_script(ROOT / "nikki/files/scripts/firewall_fw3.sh", script, functions, include)
+    env = os.environ.copy()
+    env["PATH"] = f"{bin_dir}:{env['PATH']}"
+    rules = run(["/bin/sh", str(script), "render"], env=env)
+
+    assert "# IPv4 / iptables-restore" not in rules
+    assert "# IPv6 / ip6tables-restore" in rules
+    assert "*nat" not in rules
+    assert "REDIRECT" not in rules
+    assert "NIK_NAT_" not in rules
+    assert "-p tcp --dport 53 -j NIK_MGL_PRE_TPROXY_V6" in rules
+    assert "-p udp --dport 53 -j NIK_MGL_PRE_TPROXY_V6" in rules
+    assert "-p tcp --dport 53 -j MARK --set-xmark 0x80/0xFF" in rules
+    assert "-p udp --dport 53 -j MARK --set-xmark 0x80/0xFF" in rules
 
 def test_firewall_apply(tmp: Path, common: dict) -> None:
     runtime = tmp / "runtime-apply"
@@ -404,8 +464,17 @@ case " $* " in
   *) exit 0 ;;
 esac
 """
-    for name in ["iptables", "ip6tables"]:
-        write(common["bin"] / name, xtables_mock)
+    write(common["bin"] / "iptables", xtables_mock)
+    write(
+        common["bin"] / "ip6tables",
+        """#!/bin/sh
+case " $* " in
+  *" -t nat "*) echo 'unexpected IPv6 nat access' >&2; exit 99 ;;
+  *" -C "*) exit 1 ;;
+  *) exit 0 ;;
+esac
+""",
+    )
     write(
         common["bin"] / "iptables-restore",
         f"""#!/bin/sh
@@ -444,6 +513,11 @@ exit 0
     sets = (capture / "ipset.rules").read_text()
     assert "NIK_MGL_PRE_TPROXY_V4" in rules4
     assert "NIK_MGL_PRE_TPROXY_V6" in rules6
+    assert "*nat" not in rules6
+    assert "NIK_NAT_" not in rules6
+    assert "REDIRECT" not in rules6
+    assert "-p tcp -j TPROXY --on-port 7892" in rules6
+    assert "-p udp -j TPROXY --on-port 7892" in rules6
     assert "family inet6" in sets
     assert "add nik_reserved_v6_t ::1/128 -exist" in sets
     assert "add nik_china_v6_t 2400:3200::/32 -exist" in sets
@@ -456,7 +530,7 @@ def test_static() -> None:
     assert (ROOT / "nikki/files/ipset/geoip6_cn.txt").exists()
     makefile = (ROOT / "nikki/Makefile").read_text()
     assert "+ip6tables" in makefile
-    assert "+ip6tables-mod-nat" in makefile
+    assert "+ip6tables-mod-nat" not in makefile
     assert not (ROOT / "luci-app-nikki/root/usr/share/rpcd/ucode").exists()
     shell_files = list(ROOT.rglob("*.sh")) + list(ROOT.rglob("*.init"))
     for path in shell_files:
@@ -477,6 +551,7 @@ def main() -> None:
         common = make_common_mocks(tmp)
         test_mixin(tmp, common)
         test_firewall(tmp, common)
+        test_ipv6_dns_only(tmp, common)
         test_firewall_apply(tmp, common)
     print("All Nikki Legacy tests passed.")
 

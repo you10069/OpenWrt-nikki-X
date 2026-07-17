@@ -143,11 +143,11 @@ start_service() {
 	if [ "$core_only" -eq 0 ] && [ "$proxy_enabled" -eq 1 ]; then
 		case "$tcp_mode" in
 			""|redirect) ;;
-			*) log "Proxy" "Legacy v1 supports TCP Redirect only (got: $tcp_mode)."; log "App" "Exit."; return ;;
+			*) log "Proxy" "Legacy backend supports IPv4 TCP REDIRECT and IPv6 TCP TPROXY only (got: $tcp_mode)."; log "App" "Exit."; return ;;
 		esac
 		case "$udp_mode" in
 			""|tproxy) ;;
-			*) log "Proxy" "Legacy v1 supports UDP TPROXY only (got: $udp_mode)."; log "App" "Exit."; return ;;
+			*) log "Proxy" "Legacy backend supports UDP TPROXY only (got: $udp_mode)."; log "App" "Exit."; return ;;
 		esac
 	fi
 	# get profile
@@ -237,26 +237,29 @@ start_service() {
 	# check profile
 	if [ "$core_only" = 0 ] && [ "$proxy_enabled" = 1 ]; then
 		log "Profile" "Checking..."
-		if [ "$ipv4_dns_hijack" = 1 ] || [ "$ipv6_dns_hijack" = 1 ]; then
+		# IPv4 DNS is redirected to the dedicated DNS listener. IPv6 DNS is
+		# intercepted through the transparent TPROXY listener instead.
+		if [ "$ipv4_dns_hijack" = 1 ]; then
 			if yq -M -e '(has("dns") and (.dns | .enable) and (.dns | has("listen"))) | not' "$RUN_PROFILE_PATH" > /dev/null 2>&1; then
 				log "Profile" "Check failed."
-				log "Profile" "DNS should be enabled and listen should be defined."
+				log "Profile" "IPv4 DNS hijack requires an enabled DNS listener."
 				log "App" "Exit."
 				return
 			fi
 		fi
-		if [ "$tcp_mode" = "redirect" ]; then
+		if [ "$ipv4_proxy" = 1 ] && [ "$tcp_mode" = "redirect" ]; then
 			if yq -M -e "(has(\"redir-port\") or (has(\"listeners\") and .listeners | any_c(.name == \"$redirect_listener_name\" and .type == \"redir\"))) | not" "$RUN_PROFILE_PATH" > /dev/null 2>&1; then
 				log "Profile" "Check failed."
-				log "Profile" "Redirect Port/Listener should be defined."
+				log "Profile" "IPv4 TCP REDIRECT requires a Redirect Port/Listener."
 				log "App" "Exit."
 				return
 			fi
 		fi
-		if [ "$udp_mode" = "tproxy" ]; then
+		if { [ "$ipv4_proxy" = 1 ] && [ "$udp_mode" = "tproxy" ]; } || \
+		   [ "$ipv6_proxy" = 1 ] || [ "$ipv6_dns_hijack" = 1 ]; then
 			if yq -M -e "(has(\"tproxy-port\") or (has(\"listeners\") and .listeners | any_c(.name == \"$tproxy_listener_name\" and .type == \"tproxy\"))) | not" "$RUN_PROFILE_PATH" > /dev/null 2>&1; then
 				log "Profile" "Check failed."
-				log "Profile" "TPROXY Port/Listener should be defined."
+				log "Profile" "IPv4 UDP and all IPv6 interception require a TPROXY Port/Listener."
 				log "App" "Exit."
 				return
 			fi
@@ -350,31 +353,39 @@ service_started() {
 	config_get tproxy_route_table routing tproxy_route_table 80
 
 	# IPv4 and IPv6 have separate policy routing databases, so the same mark,
-	# preference and table number can be used safely for both families.
-	if [ "$udp_mode" = tproxy ]; then
-		if [ "$ipv4_proxy" -eq 1 ] && ! add_tproxy_policy_route 4 "$tproxy_fw_mark" "$tproxy_fw_mask" "$tproxy_rule_pref" "$tproxy_route_table"; then
-			log "Routing" "Failed to create IPv4 TPROXY policy route."
-			return 1
-		fi
-		if [ "$ipv6_proxy" -eq 1 ] && ! add_tproxy_policy_route 6 "$tproxy_fw_mark" "$tproxy_fw_mask" "$tproxy_rule_pref" "$tproxy_route_table"; then
-			log "Routing" "Failed to create IPv6 TPROXY policy route."
-			remove_tproxy_policy_route 4 "$tproxy_fw_mark" "$tproxy_fw_mask" "$tproxy_rule_pref" "$tproxy_route_table"
-			return 1
-		fi
+	# preference and table number can be used safely for both families. IPv4
+	# only needs this path for UDP; every IPv6 interception path uses it.
+	local ipv4_tproxy_active ipv6_tproxy_active
+	ipv4_tproxy_active=0
+	ipv6_tproxy_active=0
+	[ "$ipv4_proxy" -eq 1 ] && [ "$udp_mode" = tproxy ] && ipv4_tproxy_active=1
+	if [ "$ipv6_dns_hijack" -eq 1 ] || \
+	   { [ "$ipv6_proxy" -eq 1 ] && { [ "$tcp_mode" = redirect ] || [ "$udp_mode" = tproxy ]; }; }; then
+		ipv6_tproxy_active=1
+	fi
+
+	if [ "$ipv4_tproxy_active" -eq 1 ] && ! add_tproxy_policy_route 4 "$tproxy_fw_mark" "$tproxy_fw_mask" "$tproxy_rule_pref" "$tproxy_route_table"; then
+		log "Routing" "Failed to create IPv4 TPROXY policy route."
+		return 1
+	fi
+	if [ "$ipv6_tproxy_active" -eq 1 ] && ! add_tproxy_policy_route 6 "$tproxy_fw_mark" "$tproxy_fw_mask" "$tproxy_rule_pref" "$tproxy_route_table"; then
+		log "Routing" "Failed to create IPv6 TPROXY policy route."
+		[ "$ipv4_tproxy_active" -eq 1 ] && remove_tproxy_policy_route 4 "$tproxy_fw_mark" "$tproxy_fw_mask" "$tproxy_rule_pref" "$tproxy_route_table"
+		return 1
 	fi
 
 	# Some vendor kernels load br_netfilter and process routed bridge frames
 	# twice. Preserve each sysctl independently and restore it on stop.
-	if [ "$udp_mode" = tproxy ] && lsmod | grep -q '^br_netfilter'; then
+	if { [ "$ipv4_tproxy_active" -eq 1 ] || [ "$ipv6_tproxy_active" -eq 1 ]; } && lsmod | grep -q '^br_netfilter'; then
 		local bridge_nf_call_iptables bridge_nf_call_ip6tables
-		if [ "$ipv4_proxy" -eq 1 ]; then
+		if [ "$ipv4_tproxy_active" -eq 1 ]; then
 			bridge_nf_call_iptables="$(sysctl -e -n net.bridge.bridge-nf-call-iptables 2>/dev/null)"
 			if [ "$bridge_nf_call_iptables" = 1 ]; then
 				touch "$BRIDGE_NF_CALL_IPTABLES_FLAG_PATH"
 				sysctl -q -w net.bridge.bridge-nf-call-iptables=0
 			fi
 		fi
-		if [ "$ipv6_proxy" -eq 1 ]; then
+		if [ "$ipv6_tproxy_active" -eq 1 ]; then
 			bridge_nf_call_ip6tables="$(sysctl -e -n net.bridge.bridge-nf-call-ip6tables 2>/dev/null)"
 			if [ "$bridge_nf_call_ip6tables" = 1 ]; then
 				touch "$BRIDGE_NF_CALL_IP6TABLES_FLAG_PATH"
@@ -384,7 +395,7 @@ service_started() {
 	fi
 
 	if "$FIREWALL_FW3_SH" apply; then
-		log "Proxy" "Firewall3 hijack is active (IPv4=$ipv4_proxy, IPv6=$ipv6_proxy, TCP=$tcp_mode, UDP=$udp_mode)."
+		log "Proxy" "Firewall3 hijack is active (IPv4 TCP=REDIRECT/UDP=TPROXY, IPv6 TCP+UDP+DNS=TPROXY)."
 	else
 		log "Proxy" "Failed to apply firewall3/xtables rules."
 		remove_tproxy_policy_route 4 "$tproxy_fw_mark" "$tproxy_fw_mask" "$tproxy_rule_pref" "$tproxy_route_table"
