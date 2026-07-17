@@ -5,6 +5,7 @@ import os
 import re
 import shutil
 import subprocess
+import tarfile
 import tempfile
 from pathlib import Path
 
@@ -317,6 +318,56 @@ def test_mixin(tmp: Path, common: dict) -> None:
     assert data["nikki-rules"] == ["DOMAIN-SUFFIX,example.com,DIRECT"]
 
 
+
+def test_default_mixin_policy(tmp: Path) -> None:
+    functions = tmp / "functions-defaults.sh"
+    write(
+        functions,
+        r'''#!/bin/sh
+config_load() { :; }
+config_get() {
+    local __var="$1" section="$2" option="$3" default="${4-}" _mock_value="$default"
+    case "$section.$option" in
+        mixin.log_level) _mock_value=warning ;;
+        mixin.mode) _mock_value=rule ;;
+        mixin.match_process) _mock_value=off ;;
+        mixin.tun_enabled) _mock_value=0 ;;
+        mixin.tun_device) _mock_value=nikki ;;
+        mixin.tun_stack) _mock_value=mixed ;;
+        mixin.dns_enabled) _mock_value=1 ;;
+        mixin.dns_listen) _mock_value='[::]:1053' ;;
+        routing.core_fw_mark) _mock_value=0x82 ;;
+    esac
+    eval "$__var=\$_mock_value"
+}
+config_get_bool() {
+    local __var="$1" value
+    config_get value "$2" "$3" "${4-0}"
+    case "$value" in 1|on|true|yes|enabled) value=1 ;; *) value=0 ;; esac
+    eval "$__var=\$value"
+}
+config_list_foreach() { :; }
+config_foreach() { :; }
+''',
+    )
+    jshn = make_jshn_mock(tmp)
+    script = tmp / "mixin-defaults.sh"
+    transformed_script(ROOT / "nikki/files/scripts/mixin.sh", script, functions, jshn)
+    env = os.environ.copy()
+    env["JSHN_OPS"] = str(tmp / "jshn-default-ops.tsv")
+    data = json.loads(run(["/bin/sh", str(script)], env=env))
+    assert data["log-level"] == "warning"
+    assert data["mode"] == "rule"
+    assert data["find-process-mode"] == "off"
+    assert data["tun"] == {"enable": False, "device": "nikki", "stack": "mixed"}
+    assert data["dns"]["enable"] is True
+    assert data["dns"]["listen"] == "[::]:1053"
+    assert "ipv6" not in data
+    assert "cache-algorithm" not in data["dns"]
+    assert "enhanced-mode" not in data["dns"]
+    assert "sniffer" not in data
+
+
 def test_firewall(tmp: Path, common: dict) -> None:
     runtime = tmp / "runtime"
     runtime.mkdir()
@@ -404,6 +455,44 @@ log() {{ printf '[%s] %s\\n' "$1" "$2" >> "$APP_LOG_PATH"; }}
     assert not re.search(r"--(?:on-port|to-ports)\s*(?:$|\n)", rules)
 
 
+
+
+
+def test_default_firewall_modes(tmp: Path, common: dict) -> None:
+    runtime = tmp / "runtime-default-firewall"
+    runtime.mkdir()
+    (runtime / "config.yaml").write_text("test: true\n")
+    include = tmp / "include-default-firewall.sh"
+    write(
+        include,
+        f'''#!/bin/sh
+TEMP_DIR="{runtime}"
+RUN_PROFILE_PATH="{runtime / 'config.yaml'}"
+APP_LOG_PATH="{runtime / 'app.log'}"
+prepare_files() {{ mkdir -p "$TEMP_DIR"; : > "$APP_LOG_PATH"; }}
+log() {{ :; }}
+''',
+    )
+    defaults_functions = tmp / "functions-default-firewall.sh"
+    text = common["functions"].read_text()
+    text = text.replace("proxy.ipv4_tcp_mode) _mock_value=redirect", "proxy.ipv4_tcp_mode) _mock_value=tproxy")
+    text = text.replace("proxy.ipv4_udp_mode) _mock_value=tun", "proxy.ipv4_udp_mode) _mock_value=tproxy")
+    text = text.replace("proxy.ipv6_tcp_mode) _mock_value=tun", "proxy.ipv6_tcp_mode) _mock_value=tproxy")
+    write(defaults_functions, text)
+    script = tmp / "firewall-defaults.sh"
+    transformed_script(ROOT / "nikki/files/scripts/firewall_fw3.sh", script, defaults_functions, include)
+    env = os.environ.copy()
+    env["PATH"] = f"{common['bin']}:{env['PATH']}"
+    rules = run(["/bin/sh", str(script), "render"], env=env)
+    ipv4 = rules.split("# IPv6 / ip6tables-restore", 1)[0]
+    ipv6 = rules.split("# IPv6 / ip6tables-restore", 1)[1]
+    assert "NIK_MGL_PRE_TPROXY_V4 -p tcp -j TPROXY --on-port 7892" in ipv4
+    assert "NIK_MGL_PRE_TPROXY_V4 -p udp -j TPROXY --on-port 7892" in ipv4
+    assert "NIK_NAT_PRE_TCP_V4 -p tcp -j REDIRECT" not in ipv4
+    assert "--dport 53 -j REDIRECT --to-ports 1053" in ipv4
+    assert "NIK_MGL_PRE_TPROXY_V6 -p tcp -j TPROXY --on-port 7892" in ipv6
+    assert "NIK_MGL_PRE_TPROXY_V6 -p udp -j TPROXY --on-port 7892" in ipv6
+    assert "--dport 53 -j MARK --set-xmark 0x80/0xFF" in ipv6
 
 
 def test_ipv4_tcp_tproxy(tmp: Path, common: dict) -> None:
@@ -637,6 +726,553 @@ def test_tun_policy_routes(tmp: Path) -> None:
     assert "-6 rule add pref 1025 fwmark 0x81/0xFF table 81" in calls
 
 
+def make_fake_core(path: Path, version: str) -> None:
+    content = (
+        "#!/bin/sh\n"
+        'case "$1" in\n'
+        f'  -v|version) echo "Mihomo Meta {version} linux test" ;;\n'
+        "  *) exit 0 ;;\n"
+        "esac\n"
+    )
+    # The updater rejects implausibly small downloads before installation.
+    content += "# padding\n" * 40000
+    write(path, content)
+
+
+def test_core_update(tmp: Path) -> None:
+    runtime = tmp / "core-update"
+    bin_dir = runtime / "bin"
+    core_dir = runtime / "core"
+    home_dir = runtime / "etc"
+    temp_dir = runtime / "tmp"
+    bin_dir.mkdir(parents=True)
+    core_dir.mkdir()
+    home_dir.mkdir()
+    temp_dir.mkdir()
+
+    active = core_dir / "mihomo"
+    previous = core_dir / "mihomo.prev"
+    download = runtime / "download-core"
+    curl_log = runtime / "curl.log"
+    service_mode = runtime / "service.mode"
+    make_fake_core(active, "v1.0.0")
+    make_fake_core(download, "v1.1.0")
+    service_mode.write_text("ok\n")
+
+    write(
+        bin_dir / "uci",
+        """#!/bin/sh
+key="$3"
+case "$key" in
+  nikki.core_update.source_type) echo direct ;;
+  nikki.core_update.direct_url) echo 'https://example.invalid/releases/v1.1.0/mihomo-linux-amd64-v1.1.0.gz?token=exact' ;;
+  nikki.core_update.user_agent) echo test ;;
+  nikki.core_update.timeout) echo 30 ;;
+  nikki.core_update.retry) echo 0 ;;
+  nikki.core_update.min_free_kb) echo 1 ;;
+  *) exit 1 ;;
+esac
+""",
+    )
+    write(
+        bin_dir / "curl",
+        f"""#!/bin/sh
+out=''
+url=''
+while [ "$#" -gt 0 ]; do
+  case "$1" in
+    -o) out="$2"; shift 2 ;;
+    -w) shift 2 ;;
+    -A|--connect-timeout|--max-time|--retry) shift 2 ;;
+    -f|-L|-s|-S|-sS) shift ;;
+    *) url="$1"; shift ;;
+  esac
+done
+printf '%s\\n' "$url" >> "{curl_log}"
+[ -n "$out" ] || exit 1
+cp "{download}" "$out"
+""",
+    )
+    write(
+        bin_dir / "opkg",
+        """#!/bin/sh
+[ "$1" = print-architecture ] || exit 1
+printf '%s\\n' 'arch all 1' 'arch aarch64_cortex-a53 10'
+""",
+    )
+    write(bin_dir / "uname", "#!/bin/sh\necho aarch64\n")
+    write(
+        bin_dir / "service",
+        f"""#!/bin/sh
+case "$1" in
+  running) exit 0 ;;
+  restart) [ "$(cat "{service_mode}")" = ok ] ;;
+esac
+""",
+    )
+
+    updater = ROOT / "nikki/files/scripts/core_update.sh"
+    env = os.environ.copy()
+    env.update(
+        {
+            "HOME_DIR": str(home_dir),
+            "CORE_DIR": str(core_dir),
+            "CORE_ACTIVE": str(active),
+            "CORE_PREVIOUS": str(previous),
+            "STATE_FILE": str(home_dir / "core-update.state"),
+            "LOCK_DIR": str(runtime / "update.lock"),
+            "TEMP_ROOT": str(temp_dir),
+            "UCI_BIN": str(bin_dir / "uci"),
+            "CURL_BIN": str(bin_dir / "curl"),
+            "OPKG_BIN": str(bin_dir / "opkg"),
+            "APK_BIN": str(bin_dir / "missing-apk"),
+            "UNAME_BIN": str(bin_dir / "uname"),
+            "SERVICE_BIN": str(bin_dir / "service"),
+        }
+    )
+
+    arches = run(["/bin/sh", str(updater), "architectures"], env=env).splitlines()
+    assert arches[:4] == ["aarch64_cortex-a53", "aarch64-cortex-a53", "aarch64", "arm64"]
+
+    installed = run(["/bin/sh", str(updater), "update"], env=env).strip()
+    assert installed == "v1.1.0"
+    assert run([str(active), "-v"]).split()[2] == "v1.1.0"
+    assert run([str(previous), "-v"]).split()[2] == "v1.0.0"
+    assert curl_log.read_text().splitlines() == [
+        "https://example.invalid/releases/v1.1.0/mihomo-linux-amd64-v1.1.0.gz?token=exact"
+    ]
+
+    rolled_back = run(["/bin/sh", str(updater), "rollback"], env=env).strip()
+    assert rolled_back == "v1.0.0"
+    assert run([str(active), "-v"]).split()[2] == "v1.0.0"
+    assert run([str(previous), "-v"]).split()[2] == "v1.1.0"
+
+    # A restart failure must restore both original slots. Also leave a stale
+    # lock behind to verify that an updater killed without cleanup is recoverable.
+    make_fake_core(download, "v1.2.0")
+    service_mode.write_text("fail\n")
+    stale_lock = runtime / "update.lock"
+    stale_lock.mkdir()
+    (stale_lock / "pid").write_text("999999999\n")
+    failed = subprocess.run(
+        ["/bin/sh", str(updater), "update"], text=True, capture_output=True, env=env
+    )
+    assert failed.returncode != 0
+    assert run([str(active), "-v"]).split()[2] == "v1.0.0"
+    assert run([str(previous), "-v"]).split()[2] == "v1.1.0"
+    assert "已保留原核心" in failed.stderr
+    assert not stale_lock.exists()
+
+    run(["/bin/sh", str(updater), "delete-previous"], env=env)
+    assert not previous.exists()
+
+def test_shellcrash_repository_update(tmp: Path) -> None:
+    runtime = tmp / "repository-update"
+    bin_dir = runtime / "bin"
+    core_dir = runtime / "core"
+    home_dir = runtime / "etc"
+    temp_dir = runtime / "tmp"
+    bin_dir.mkdir(parents=True)
+    core_dir.mkdir()
+    home_dir.mkdir()
+    temp_dir.mkdir()
+
+    active = core_dir / "mihomo"
+    previous = core_dir / "mihomo.prev"
+    download = runtime / "download-core"
+    curl_log = runtime / "curl.log"
+    make_fake_core(active, "v1.0.0")
+    make_fake_core(download, "v1.2.3")
+
+    write(
+        bin_dir / "uci",
+        """#!/bin/sh
+key="$3"
+case "$key" in
+  nikki.core_update.source_type) echo repository ;;
+  nikki.core_update.repository_url) echo 'https://mirror.invalid/root/' ;;
+  nikki.core_update.user_agent) echo test ;;
+  nikki.core_update.timeout) echo 30 ;;
+  nikki.core_update.retry) echo 0 ;;
+  nikki.core_update.min_free_kb) echo 1 ;;
+  *) exit 1 ;;
+esac
+""",
+    )
+    expected_asset = "https://mirror.invalid/root/bin/meta/mihomo-linux-aarch64_cortex-a53.tar.gz"
+    write(
+        bin_dir / "curl",
+        f"""#!/bin/sh
+out=''
+url=''
+while [ "$#" -gt 0 ]; do
+  case "$1" in
+    -o) out="$2"; shift 2 ;;
+    -w) shift 2 ;;
+    -A|--connect-timeout|--max-time|--retry) shift 2 ;;
+    -f|-L|-s|-S|-sS) shift ;;
+    *) url="$1"; shift ;;
+  esac
+done
+printf '%s\\n' "$url" >> "{curl_log}"
+case "$url" in
+  https://mirror.invalid/root/bin/version)
+    [ -z "$out" ] || exit 22
+    echo 'meta_v=v1.2.3 versionsh=1.9.5'
+    ;;
+  {expected_asset})
+    [ -n "$out" ] || exit 22
+    cp "{download}" "$out"
+    ;;
+  *) exit 22 ;;
+esac
+""",
+    )
+    write(
+        bin_dir / "opkg",
+        """#!/bin/sh
+[ "$1" = print-architecture ] || exit 1
+printf '%s\\n' 'arch all 1' 'arch aarch64_cortex-a53 10'
+""",
+    )
+    write(bin_dir / "uname", "#!/bin/sh\necho aarch64\n")
+    write(bin_dir / "service", "#!/bin/sh\nexit 1\n")
+
+    updater = ROOT / "nikki/files/scripts/core_update.sh"
+    env = os.environ.copy()
+    env.update(
+        {
+            "HOME_DIR": str(home_dir),
+            "CORE_DIR": str(core_dir),
+            "CORE_ACTIVE": str(active),
+            "CORE_PREVIOUS": str(previous),
+            "STATE_FILE": str(home_dir / "core-update.state"),
+            "LOCK_DIR": str(runtime / "update.lock"),
+            "TEMP_ROOT": str(temp_dir),
+            "UCI_BIN": str(bin_dir / "uci"),
+            "CURL_BIN": str(bin_dir / "curl"),
+            "OPKG_BIN": str(bin_dir / "opkg"),
+            "APK_BIN": str(bin_dir / "missing-apk"),
+            "UNAME_BIN": str(bin_dir / "uname"),
+            "SERVICE_BIN": str(bin_dir / "service"),
+        }
+    )
+
+    assert run(["/bin/sh", str(updater), "update"], env=env).strip() == "v1.2.3"
+    assert run([str(active), "-v"]).split()[2] == "v1.2.3"
+    assert run([str(previous), "-v"]).split()[2] == "v1.0.0"
+    assert curl_log.read_text().splitlines() == [
+        "https://mirror.invalid/root/bin/version",
+        expected_asset,
+    ]
+
+
+def test_shellcrash_automatic_https_fallback(tmp: Path) -> None:
+    runtime = tmp / "repository-auto-fallback"
+    bin_dir = runtime / "bin"
+    core_dir = runtime / "core"
+    home_dir = runtime / "etc"
+    temp_dir = runtime / "tmp"
+    bin_dir.mkdir(parents=True)
+    core_dir.mkdir()
+    home_dir.mkdir()
+    temp_dir.mkdir()
+
+    active = core_dir / "mihomo"
+    previous = core_dir / "mihomo.prev"
+    download = runtime / "download-core"
+    curl_log = runtime / "curl.log"
+    make_fake_core(active, "v1.0.0")
+    make_fake_core(download, "v1.19.17")
+
+    write(
+        bin_dir / "uci",
+        """#!/bin/sh
+key="$3"
+case "$key" in
+  nikki.core_update.source_type) echo repository ;;
+  nikki.core_update.repository_preset) echo auto ;;
+  nikki.core_update.user_agent) echo test ;;
+  nikki.core_update.timeout) echo 30 ;;
+  nikki.core_update.retry) echo 0 ;;
+  nikki.core_update.min_free_kb) echo 1 ;;
+  *) exit 1 ;;
+esac
+""",
+    )
+    selected_base = "https://cdn.jsdelivr.net/gh/juewuy/ShellCrash@dev"
+    expected_asset = selected_base + "/bin/meta/clash-linux-arm64.tar.gz"
+    write(
+        bin_dir / "curl",
+        f"""#!/bin/sh
+out=''
+url=''
+while [ "$#" -gt 0 ]; do
+  case "$1" in
+    -o) out="$2"; shift 2 ;;
+    -w) shift 2 ;;
+    -A|--connect-timeout|--max-time|--retry) shift 2 ;;
+    -f|-L|-s|-S|-sS) shift ;;
+    *) url="$1"; shift ;;
+  esac
+done
+printf '%s\\n' "$url" >> "{curl_log}"
+case "$url" in
+  {selected_base}/bin/version)
+    [ -z "$out" ] || exit 22
+    echo 'meta_v=v1.19.17 versionsh=1.9.5alpha15'
+    ;;
+  {expected_asset})
+    [ -n "$out" ] || exit 22
+    cp "{download}" "$out"
+    ;;
+  *) exit 22 ;;
+esac
+""",
+    )
+    write(
+        bin_dir / "opkg",
+        """#!/bin/sh
+[ "$1" = print-architecture ] || exit 1
+printf '%s\\n' 'arch all 1' 'arch aarch64_cortex-a53 10'
+""",
+    )
+    write(bin_dir / "uname", "#!/bin/sh\necho aarch64\n")
+    write(bin_dir / "service", "#!/bin/sh\nexit 1\n")
+
+    updater = ROOT / "nikki/files/scripts/core_update.sh"
+    env = os.environ.copy()
+    env.update(
+        {
+            "HOME_DIR": str(home_dir),
+            "CORE_DIR": str(core_dir),
+            "CORE_ACTIVE": str(active),
+            "CORE_PREVIOUS": str(previous),
+            "STATE_FILE": str(home_dir / "core-update.state"),
+            "LOCK_DIR": str(runtime / "update.lock"),
+            "TEMP_ROOT": str(temp_dir),
+            "UCI_BIN": str(bin_dir / "uci"),
+            "CURL_BIN": str(bin_dir / "curl"),
+            "OPKG_BIN": str(bin_dir / "opkg"),
+            "APK_BIN": str(bin_dir / "missing-apk"),
+            "UNAME_BIN": str(bin_dir / "uname"),
+            "SERVICE_BIN": str(bin_dir / "service"),
+        }
+    )
+
+    assert run(["/bin/sh", str(updater), "update"], env=env).strip() == "v1.19.17"
+    assert run([str(active), "-v"]).split()[2] == "v1.19.17"
+    urls = curl_log.read_text().splitlines()
+    assert urls[0] == "https://testingcf.jsdelivr.net/gh/juewuy/ShellCrash@dev/bin/version"
+    assert selected_base + "/bin/version" in urls
+    assert urls[-1] == expected_asset
+    assert not any(url.startswith("http://t.jwsc.eu.org") for url in urls)
+    state = (home_dir / "core-update.state").read_text()
+    assert f"resolved_repository_base={selected_base}" in state
+
+
+
+def test_core_archive_extraction(tmp: Path) -> None:
+    source = (ROOT / "nikki/files/scripts/core_update.sh").read_text()
+    marker = 'case "${1:-status}" in\n'
+    index = source.rfind(marker)
+    assert index > 0
+    source = source[:index] + 'extract_candidate "$1" "$2"\n'
+    helper = tmp / "extract-core.sh"
+    write(helper, source)
+    temp_root = tmp / "extract-temp"
+    temp_root.mkdir()
+    core = tmp / "mihomo"
+    make_fake_core(core, "v9.9.9")
+    archive = tmp / "core.tar.gz"
+    with tarfile.open(archive, "w:gz") as tf:
+        directory = tarfile.TarInfo("nested directory/")
+        directory.type = tarfile.DIRTYPE
+        directory.mode = 0o755
+        tf.addfile(directory)
+        tf.add(core, arcname="nested directory/mihomo")
+    output = tmp / "extracted-core"
+    env = os.environ.copy()
+    env["TEMP_ROOT"] = str(temp_root)
+    run(["/bin/sh", str(helper), str(archive), str(output)], env=env)
+    assert output.read_bytes() == core.read_bytes()
+    assert output.stat().st_mode & 0o111
+
+    malicious = tmp / "malicious.tar.gz"
+    payload = b"malicious"
+    with tarfile.open(malicious, "w:gz") as tf:
+        import io
+        info = tarfile.TarInfo("../mihomo")
+        info.size = len(payload)
+        tf.addfile(info, io.BytesIO(payload))
+    rejected = subprocess.run(
+        ["/bin/sh", str(helper), str(malicious), str(tmp / "bad-output")],
+        text=True,
+        capture_output=True,
+        env=env,
+    )
+    assert rejected.returncode != 0
+
+
+def test_rpc_transactional_write(tmp: Path) -> None:
+    runtime = tmp / "rpc-write"
+    profiles = runtime / "profiles"
+    profiles.mkdir(parents=True)
+    jshn = make_jshn_mock(runtime)
+    source = (ROOT / "luci-app-nikki/root/usr/libexec/nikki-rpc").read_text()
+    source = source.replace('. /usr/share/libubox/jshn.sh', f'. "{jshn}"', 1)
+    source = source.replace('/etc/nikki/profiles/*.yaml', f'{profiles}/*.yaml')
+    source = source.replace('/etc/nikki/profiles/*.yml', f'{profiles}/*.yml')
+    source = source.replace('TMP_DIR="/var/run/nikki"', f'TMP_DIR="{runtime / "tmp"}"', 1)
+    helper = runtime / "nikki-rpc"
+    write(helper, source)
+    target = profiles / "test.yaml"
+    target.write_text("old")
+    env = os.environ.copy()
+    env["JSHN_OPS"] = str(runtime / "jshn-ops.tsv")
+
+    first = json.loads(run(["/bin/sh", str(helper), "write-file", str(target), "new-", "0", "644", "0"], env=env))
+    assert first["success"] is True
+    assert target.read_text() == "old"
+    assert Path(str(target) + ".nikki-write").read_text() == "new-"
+
+    final = json.loads(run(["/bin/sh", str(helper), "write-file", str(target), "content", "1", "644", "1"], env=env))
+    assert final["success"] is True
+    assert target.read_text() == "new-content"
+    assert not Path(str(target) + ".nikki-write").exists()
+
+    legacy = json.loads(run(["/bin/sh", str(helper), "write-file", str(target), "legacy", "0", "600"], env=env))
+    assert legacy["success"] is True
+    assert target.read_text() == "legacy"
+
+    rejected = subprocess.run(
+        ["/bin/sh", str(helper), "write-file", str(target), "x", "2", "644", "1"],
+        text=True,
+        capture_output=True,
+        env=env,
+    )
+    assert rejected.returncode != 0
+    assert target.read_text() == "legacy"
+
+
+def test_rpc_ipv6_wildcard(tmp: Path) -> None:
+    runtime = tmp / "rpc-ipv6"
+    bin_dir = runtime / "bin"
+    bin_dir.mkdir(parents=True)
+    profile = runtime / "config.yaml"
+    profile.write_text("external-controller: http://[::]:9090\n")
+    curl_log = runtime / "curl.log"
+    jshn = runtime / "jshn.sh"
+    write(jshn, "#!/bin/sh\n")
+
+    write(
+        bin_dir / "yq",
+        """#!/bin/sh
+for arg in "$@"; do
+  case "$arg" in
+    *external-controller-tls*) echo ''; exit 0 ;;
+    *external-controller*) echo 'http://[::]:9090'; exit 0 ;;
+    *secret*) echo ''; exit 0 ;;
+  esac
+done
+cat
+""",
+    )
+    write(
+        bin_dir / "curl",
+        f"""#!/bin/sh
+printf '%s\\n' "$*" > "{curl_log}"
+printf '{{}}\\n'
+""",
+    )
+
+    source = (ROOT / "luci-app-nikki/root/usr/libexec/nikki-rpc").read_text()
+    source = source.replace('. /usr/share/libubox/jshn.sh', f'. "{jshn}"', 1)
+    source = source.replace('RUN_PROFILE="$HOME_DIR/run/config.yaml"', f'RUN_PROFILE="{profile}"', 1)
+    source = source.replace('TMP_DIR="/var/run/nikki"', f'TMP_DIR="{runtime / "tmp"}"', 1)
+    helper = runtime / "nikki-rpc"
+    write(helper, source)
+    env = os.environ.copy()
+    env["PATH"] = f"{bin_dir}:{env['PATH']}"
+    output = run(["/bin/sh", str(helper), "api", "GET", "/version", "", ""], env=env)
+    assert json.loads(output) == {}
+    call = curl_log.read_text()
+    assert "http://127.0.0.1:9090/version" in call
+    assert "http://[::]:9090/version" not in call
+
+
+def test_frontend_backend_contracts() -> None:
+    app_js = (ROOT / "luci-app-nikki/htdocs/luci-static/resources/view/nikki/app.js").read_text()
+    proxy_js = (ROOT / "luci-app-nikki/htdocs/luci-static/resources/view/nikki/proxy.js").read_text()
+    mixin_js = (ROOT / "luci-app-nikki/htdocs/luci-static/resources/view/nikki/mixin.js").read_text()
+    tools_js = (ROOT / "luci-app-nikki/htdocs/luci-static/resources/tools/nikki.js").read_text()
+    rpc_helper = (ROOT / "luci-app-nikki/root/usr/libexec/nikki-rpc").read_text()
+    updater = (ROOT / "nikki/files/scripts/core_update.sh").read_text()
+    init = (ROOT / "nikki/files/nikki.init").read_text()
+    mixin = (ROOT / "nikki/files/scripts/mixin.sh").read_text()
+
+    # Every UI source/action enum has a matching backend case.
+    for source in ("official", "repository", "release", "direct"):
+        assert f"o.value('{source}'" in app_js
+        assert source in updater
+    for preset in ("auto", "cloudflare", "jsdelivr", "github", "author_https", "author_http", "custom"):
+        assert f"o.value('{preset}'" in app_js
+        assert preset in updater
+    for action in ("check", "update", "rollback", "delete-previous"):
+        assert f"'{action}'" in app_js
+        assert action in rpc_helper
+        assert action in updater
+    for helper_action in ("version", "profile", "update-subscription", "core-status", "core-action", "api", "identifiers", "debug", "write-file"):
+        assert f"callNikki('{helper_action}'" in tools_js
+        assert f"{helper_action})" in rpc_helper
+
+    # UI fields added for DNS overwrite and TUN timing are consumed and
+    # validated by the runtime path, not merely present in UCI defaults.
+    assert "dns_proxy_server_nameserver_policy" in mixin_js
+    assert "dns_proxy_server_nameserver_policy" in mixin
+    assert 'config_get_bool overwrite_dns_proxy_server_nameserver_policy' in init
+    assert "del(.dns.proxy-server-nameserver-policy)" in init
+    assert "range(1, 3600)" in proxy_js
+    assert "range(1, 60)" in proxy_js
+    assert 'case "$tun_interval" in' in init and "|0) tun_interval=1" in init
+    assert "tun_remaining" in init
+
+    # Cron write is idempotent and updater status fields survive the RPC bridge.
+    assert "sed -i '/#nikki/d' /etc/crontabs/root" in init
+    assert "resolved_repository_base" in rpc_helper
+    assert "resolved_repository_base" in updater
+    assert "coreInfo.resolved_asset" in app_js
+    assert "coreInfo.resolved_url" in app_js
+    assert "http://\\[::\\]:*" in rpc_helper
+    assert ".nikki-write" in rpc_helper
+    assert "[path, chunk, append, mode, final]" in tools_js
+    assert "Do not split a UTF-16 surrogate pair" in tools_js
+    assert "https://\\[::\\]:*" in rpc_helper
+
+    # Every menu target has a corresponding LuCI view file.
+    menu = json.loads((ROOT / "luci-app-nikki/root/usr/share/luci/menu.d/luci-app-nikki.json").read_text())
+    for entry in menu.values():
+        action = entry.get("action", {})
+        if action.get("type") == "view":
+            path = action["path"].split("/", 1)[1]
+            assert (ROOT / f"luci-app-nikki/htdocs/luci-static/resources/view/nikki/{path}.js").exists()
+
+    # All literal LuCI translations are represented in the template and POs.
+    ui_messages = set()
+    for path in (ROOT / "luci-app-nikki/htdocs").rglob("*.js"):
+        for match in re.finditer(r"_\\(\\s*'((?:\\\\'|[^'])*)'\\s*\\)", path.read_text()):
+            ui_messages.add(match.group(1).replace("\\\\'", "'"))
+    translation_files = [
+        ROOT / "luci-app-nikki/po/templates/nikki.pot",
+        ROOT / "luci-app-nikki/po/zh_Hans/nikki.po",
+        ROOT / "luci-app-nikki/po/zh_Hant/nikki.po",
+        ROOT / "luci-app-nikki/po/ru/nikki.po",
+    ]
+    for path in translation_files:
+        msgids = set(re.findall(r'^msgid "(.*)"$', path.read_text(), re.M))
+        assert not (ui_messages - msgids), f"missing translations in {path}: {sorted(ui_messages - msgids)}"
+
+
 def test_static() -> None:
     assert not (ROOT / ".github").exists()
     assert not (ROOT / "nikki/files/ucode").exists()
@@ -644,9 +1280,93 @@ def test_static() -> None:
     assert (ROOT / "nikki/files/ipset/geoip6_cn.txt").exists()
     makefile = (ROOT / "nikki/Makefile").read_text()
     assert "+ip6tables" in makefile
+    assert "+mihomo" not in makefile
+    for dependency in ("+jshn", "+jsonfilter", "+ubus"):
+        assert dependency in makefile
+    assert "core_update.sh" in makefile
+    updater_static = (ROOT / "nikki/files/scripts/core_update.sh").read_text()
+    assert "tar -xOzf" in updater_static
+    assert "tar -xzf" not in updater_static
     assert "+ip6tables-mod-nat" not in makefile
     assert not (ROOT / "luci-app-nikki/root/usr/share/rpcd/ucode").exists()
     conf = (ROOT / "nikki/files/nikki.conf").read_text()
+
+    # Legacy 5.2 default-policy regression: keep LuCI defaults and the shipped
+    # UCI file aligned. Missing optional mixin fields mean "Unmodified".
+    for required_default in (
+        "option 'scheduled_restart' '1'",
+        "option 'scheduled_restart_cron' '0 3 * * *'",
+        "option 'test_profile' '1'",
+        "option 'log_level' 'warning'",
+        "option 'mode' 'rule'",
+        "option 'match_process' 'off'",
+        "option 'tun_enabled' '0'",
+        "option 'tun_device' 'nikki'",
+        "option 'tun_stack' 'mixed'",
+        "option 'dns_enabled' '1'",
+        "option 'dns_listen' '[::]:1053'",
+        "option 'fake_ip_filter' '0'",
+        "option 'hosts' '0'",
+        "option 'dns_nameserver' '0'",
+        "option 'dns_proxy_server_nameserver_policy' '0'",
+        "option 'dns_nameserver_policy' '0'",
+        "option 'sniffer_force_domain_name' '0'",
+        "option 'sniffer_ignore_domain_name' '0'",
+        "option 'sniffer_sniff' '0'",
+        "option 'rule' '0'",
+        "option 'rule_provider' '0'",
+        "option 'mixin_file_content' '0'",
+        "option 'ipv4_tcp_mode' 'tproxy'",
+        "option 'ipv4_udp_mode' 'tproxy'",
+        "option 'ipv6_tcp_mode' 'tproxy'",
+        "option 'ipv6_udp_mode' 'tproxy'",
+        "option 'ipv4_dns_mode' 'redirect'",
+        "option 'ipv6_dns_mode' 'tproxy'",
+    ):
+        assert required_default in conf
+
+    for unmodified_default in (
+        "option 'ipv6'",
+        "option 'dns_cache_algorithm'",
+        "option 'dns_ipv6'",
+        "option 'dns_mode'",
+        "option 'fake_ip_range'",
+        "option 'fake_ip6_range'",
+        "option 'fake_ip_ttl'",
+        "option 'fake_ip_filter_mode'",
+        "option 'fake_ip_cache'",
+        "option 'dns_respect_rules'",
+        "option 'dns_doh_prefer_http3'",
+        "option 'dns_system_hosts'",
+        "option 'dns_hosts'",
+        "option 'dns_direct_nameserver_follow_policy'",
+        "option 'sniffer'",
+        "option 'sniffer_sniff_dns_mapping'",
+        "option 'sniffer_sniff_pure_ip'",
+    ):
+        assert unmodified_default not in conf
+
+    migrate_source = (ROOT / "nikki/files/uci-defaults/migrate.sh").read_text()
+    assert "nikki.config.scheduled_restart=1" in migrate_source
+    assert "nikki.config.scheduled_restart_cron='0 3 * * *'" in migrate_source
+    assert "nikki.core_update.repository_preset=custom" in migrate_source
+    assert "nikki.core_update.repository_preset=auto" in migrate_source
+    assert "nikki.mixin.dns_listen='[::]:1053'" in migrate_source
+    assert "nikki.proxy.ipv6_tcp_mode=tproxy" in migrate_source
+    assert "nikki.proxy.ipv6_udp_mode=tproxy" in migrate_source
+    assert "nikki.proxy.ipv6_dns_mode=tproxy" in migrate_source
+
+    updater_source = (ROOT / "nikki/files/scripts/core_update.sh").read_text()
+    for source in (
+        "https://cdn.jsdelivr.net/gh/juewuy/ShellCrash@dev",
+        "https://raw.githubusercontent.com/juewuy/ShellCrash/dev",
+        "https://gh.jwsc.eu.org/dev",
+        "https://testingcf.jsdelivr.net/gh/juewuy/ShellCrash@dev",
+        "http://t.jwsc.eu.org",
+    ):
+        assert source in updater_source
+    assert "repository_preset" in conf
+    assert "Automatic HTTPS Fallback" in (ROOT / "luci-app-nikki/htdocs/luci-static/resources/view/nikki/app.js").read_text()
     proxy_js = (ROOT / "luci-app-nikki/htdocs/luci-static/resources/view/nikki/proxy.js").read_text()
     for key in (
         "ipv4_tcp_mode", "ipv4_udp_mode", "ipv6_tcp_mode",
@@ -661,14 +1381,21 @@ def test_static() -> None:
         assert f"option '{old_key}'" not in conf
     assert "TUN" in proxy_js
     init = (ROOT / "nikki/files/nikki.init").read_text()
+    assert 'PROG="/usr/libexec/nikki/mihomo"' in init
+    assert "update_core" in init
+    assert "rollback_core" in init
     assert "add_tun_policy_route" in init
     assert "remove_tun_policy_route" in init
     assert "tun_fw_mark" in init
     assert ".auto-route = false" in init
     assert ".auto-redirect = false" in init
+    assert "PKG_VERSION:=2026.07.17.legacy5.3" in makefile
+    assert "PKG_VERSION:=1.26.1.legacy5.3" in (ROOT / "luci-app-nikki/Makefile").read_text()
+    test_frontend_backend_contracts()
     shell_files = list(ROOT.rglob("*.sh")) + list(ROOT.rglob("*.init"))
     for path in shell_files:
         run(["/bin/sh", "-n", str(path)])
+        run(["busybox", "ash", "-n", str(path)])
     for path in (ROOT / "luci-app-nikki/htdocs").rglob("*.js"):
         run(["node", "--check", str(path)])
     for path in [
@@ -684,11 +1411,19 @@ def main() -> None:
         tmp = Path(td)
         common = make_common_mocks(tmp)
         test_mixin(tmp, common)
+        test_default_mixin_policy(tmp)
         test_firewall(tmp, common)
+        test_default_firewall_modes(tmp, common)
         test_ipv4_tcp_tproxy(tmp, common)
         test_ipv6_dns_only(tmp, common)
         test_firewall_apply(tmp, common)
         test_tun_policy_routes(tmp)
+        test_core_update(tmp)
+        test_shellcrash_repository_update(tmp)
+        test_shellcrash_automatic_https_fallback(tmp)
+        test_core_archive_extraction(tmp)
+        test_rpc_transactional_write(tmp)
+        test_rpc_ipv6_wildcard(tmp)
     print("All Nikki Legacy tests passed.")
 
 

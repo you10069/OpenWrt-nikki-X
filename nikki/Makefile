@@ -1,7 +1,7 @@
 include $(TOPDIR)/rules.mk
 
 PKG_NAME:=nikki
-PKG_VERSION:=2026.04.08.legacy4
+PKG_VERSION:=2026.07.17.legacy5.3
 PKG_RELEASE:=1
 PKGARCH:=all
 
@@ -15,9 +15,9 @@ define Package/nikki
   CATEGORY:=Network
   TITLE:=Nikki legacy transparent proxy for firewall3/xtables
   URL:=https://github.com/nikkinikki-org/OpenWrt-nikki
-  DEPENDS:=+ca-bundle +curl +yq +firewall +iptables +ip6tables +ipset +ip-full \
+  DEPENDS:=+ca-bundle +curl +yq +jshn +jsonfilter +ubus +firewall +iptables +ip6tables +ipset +ip-full \
     +iptables-mod-tproxy +iptables-mod-extra +iptables-mod-ipopt \
-    +kmod-ipt-ipset +kmod-tun +mihomo
+    +kmod-ipt-ipset +kmod-tun
 endef
 
 define Package/nikki/description
@@ -41,6 +41,7 @@ define Package/nikki/install
 	$(INSTALL_DIR) $(1)/etc/nikki/run/providers
 	$(INSTALL_DIR) $(1)/etc/nikki/run/providers/rule
 	$(INSTALL_DIR) $(1)/etc/nikki/run/providers/proxy
+	$(INSTALL_DIR) $(1)/usr/libexec/nikki
 
 	$(INSTALL_DATA) $(CURDIR)/files/mixin.yaml $(1)/etc/nikki/mixin.yaml
 	$(INSTALL_DATA) $(CURDIR)/files/ipset/geoip_cn.txt $(1)/etc/nikki/ipset/geoip_cn.txt
@@ -51,6 +52,7 @@ define Package/nikki/install
 	$(INSTALL_BIN) $(CURDIR)/files/scripts/firewall_fw3.sh $(1)/etc/nikki/scripts/firewall_fw3.sh
 	$(INSTALL_BIN) $(CURDIR)/files/scripts/firewall_include.sh $(1)/etc/nikki/scripts/firewall_include.sh
 	$(INSTALL_BIN) $(CURDIR)/files/scripts/debug.sh $(1)/etc/nikki/scripts/debug.sh
+	$(INSTALL_BIN) $(CURDIR)/files/scripts/core_update.sh $(1)/etc/nikki/scripts/core_update.sh
 
 	$(INSTALL_DIR) $(1)/etc/config
 	$(INSTALL_CONF) $(CURDIR)/files/nikki.conf $(1)/etc/config/nikki

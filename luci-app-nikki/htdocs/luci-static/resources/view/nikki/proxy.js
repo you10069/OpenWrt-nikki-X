@@ -71,7 +71,7 @@ return view.extend({
         o.value('tproxy', _('TPROXY'));
 
         o = s.taboption('proxy', form.Value, 'tun_timeout', _('TUN Device Timeout'));
-        o.datatype = 'uinteger';
+        o.datatype = 'range(1, 3600)';
         o.default = '30';
         o.depends('ipv4_tcp_mode', 'tun');
         o.depends('ipv4_udp_mode', 'tun');
@@ -79,7 +79,7 @@ return view.extend({
         o.depends('ipv6_udp_mode', 'tun');
 
         o = s.taboption('proxy', form.Value, 'tun_interval', _('TUN Device Check Interval'));
-        o.datatype = 'uinteger';
+        o.datatype = 'range(1, 60)';
         o.default = '1';
         o.depends('ipv4_tcp_mode', 'tun');
         o.depends('ipv4_udp_mode', 'tun');

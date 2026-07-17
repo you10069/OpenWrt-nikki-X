@@ -85,21 +85,37 @@ return baseclass.extend({
         // to the fixed helper instead, which validates every destination path.
         const chunkSize = 8 * 1024;
         if (data.length <= chunkSize)
-            return callNikki('write-file', [path, data, '0', mode]);
+            return callNikki('write-file', [path, data, '0', mode, '1']);
 
         let promise = Promise.resolve();
-        for (let offset = 0; offset < data.length; offset += chunkSize) {
-            const chunk = data.slice(offset, Math.min(offset + chunkSize, data.length));
+        for (let offset = 0; offset < data.length;) {
+            let end = Math.min(offset + chunkSize, data.length);
+            // Do not split a UTF-16 surrogate pair across two helper calls.
+            if (end < data.length &&
+                data.charCodeAt(end - 1) >= 0xD800 && data.charCodeAt(end - 1) <= 0xDBFF &&
+                data.charCodeAt(end) >= 0xDC00 && data.charCodeAt(end) <= 0xDFFF)
+                end--;
+            const chunk = data.slice(offset, end);
             const append = offset > 0 ? '1' : '0';
+            const final = end >= data.length ? '1' : '0';
             promise = promise.then(function () {
-                return callNikki('write-file', [path, chunk, append, mode]);
+                return callNikki('write-file', [path, chunk, append, mode, final]);
             });
+            offset = end;
         }
         return promise;
     },
 
     version: function () {
         return callNikki('version');
+    },
+
+    coreStatus: function () {
+        return callNikki('core-status');
+    },
+
+    coreAction: function (action) {
+        return callNikki('core-action', [action]);
     },
 
     profile: function (defaults) {

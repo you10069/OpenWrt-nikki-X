@@ -1164,3 +1164,166 @@ msgstr "將 TCP/UDP 53 連接埠作為一般透明流量 TPROXY 至 Mihomo TPROX
 
 msgid "IPv4 TCP: REDIRECT / TPROXY / TUN; IPv4 UDP: TPROXY / TUN; IPv6 TCP/UDP: TPROXY / TUN; IPv4 DNS: REDIRECT to Mihomo DNS; IPv6 DNS: TPROXY as transparent traffic."
 msgstr "IPv4 TCP：REDIRECT / TPROXY / TUN；IPv4 UDP：TPROXY / TUN；IPv6 TCP/UDP：TPROXY / TUN；IPv4 DNS：重新導向至 Mihomo DNS；IPv6 DNS：作為透明流量透過 TPROXY。"
+
+msgid "Device Architecture"
+msgstr "裝置架構"
+
+msgid "Current Running Version"
+msgstr "目前執行版本"
+
+msgid "Previous Version"
+msgstr "上一版本"
+
+msgid "Rollback"
+msgstr "回退"
+
+msgid "Delete"
+msgstr "刪除"
+
+msgid "Latest Version"
+msgstr "最新版本"
+
+msgid "Update Source"
+msgstr "更新來源"
+
+msgid "Update Status"
+msgstr "更新狀態"
+
+msgid "Core Update"
+msgstr "核心更新"
+
+msgid "Check Update"
+msgstr "檢查更新"
+
+msgid "Update Core"
+msgstr "更新核心"
+
+msgid "Not Checked"
+msgstr "未檢查"
+
+msgid "Checked"
+msgstr "已檢查"
+
+msgid "Updating"
+msgstr "更新中"
+
+msgid "Update Successful"
+msgstr "更新成功"
+
+msgid "Update Failed"
+msgstr "更新失敗"
+
+msgid "Rolled Back"
+msgstr "已回退"
+
+msgid "Previous Version Deleted"
+msgstr "上一版本已刪除"
+
+msgid "Core operation failed"
+msgstr "核心操作失敗"
+
+msgid "Core rollback completed."
+msgstr "核心回退完成。"
+
+msgid "Previous core deleted."
+msgstr "上一版本核心已刪除。"
+
+msgid "Update source checked."
+msgstr "更新來源檢查完成。"
+
+msgid "Core updated successfully."
+msgstr "核心更新成功。"
+
+msgid "Mihomo Core Update"
+msgstr "Mihomo 核心更新"
+
+
+msgid "Source Type"
+msgstr "更新來源類型"
+
+msgid "Official MetaCubeX Releases"
+msgstr "MetaCubeX 官方 Releases"
+
+msgid "Custom ShellCrash-Compatible Repository"
+msgstr "自訂 ShellCrash 相容倉庫"
+
+msgid "Custom Releases URL"
+msgstr "自訂 Releases 位址"
+
+msgid "Exact Direct URL"
+msgstr "精確直鏈"
+
+msgid "Repository Base URL"
+msgstr "倉庫基礎位址"
+
+msgid "Releases URL"
+msgstr "Releases 位址"
+
+msgid "Release Tag"
+msgstr "Tag 標籤"
+
+msgid "Download Timeout"
+msgstr "下載逾時"
+
+msgid "Download Retry"
+msgstr "下載重試次數"
+
+msgid "Minimum Free Space"
+msgstr "最低可用空間"
+
+msgid "In KiB. Insufficient storage returns an error without replacing either core slot."
+msgstr "單位為 KiB。空間不足時僅回傳錯誤，不替換任何核心槽位。"
+
+msgid "ShellCrash Sources"
+msgstr "ShellCrash 來源"
+
+msgid "ShellCrash Source"
+msgstr "ShellCrash 來源"
+
+msgid "Automatic HTTPS Fallback (Recommended)"
+msgstr "HTTPS 自動回退（推薦）"
+
+msgid "Cloudflare jsDelivr (Recommended by ShellCrash)"
+msgstr "Cloudflare jsDelivr（ShellCrash 推薦）"
+
+msgid "jsDelivr CDN"
+msgstr "jsDelivr CDN"
+
+msgid "GitHub Raw"
+msgstr "GitHub Raw"
+
+msgid "Author HTTPS Mirror"
+msgstr "作者 HTTPS 鏡像"
+
+msgid "Author HTTP Beta Source (Unsafe)"
+msgstr "作者 HTTP 內測源（不安全）"
+
+msgid "Automatic mode tries all four HTTPS sources and never falls back to the unencrypted HTTP beta source."
+msgstr "自動模式依次嘗試四個 HTTPS 來源，絕不會回退到未加密的 HTTP 內測來源。"
+
+msgid "Custom Repository Base URL"
+msgstr "自訂倉庫根地址"
+
+msgid "Nikki helper failed"
+msgstr "Nikki 輔助程式執行失敗"
+
+msgid "Invalid response from Nikki helper"
+msgstr "Nikki 輔助程式傳回無效回應"
+
+msgid "REDIRECT"
+msgstr "REDIRECT"
+
+msgid "TPROXY"
+msgstr "TPROXY"
+
+msgid "TUN"
+msgstr "TUN"
+
+msgid "The active and previous cores are stored in two fixed slots. A downloaded core is validated before replacement; a failed restart restores both original slots."
+msgstr "目前核心和上一版本核心儲存在兩個固定槽位中。下載的核心會在替換前驗證；若服務重新啟動失敗，將還原原本的兩個槽位。"
+
+msgid "Resolved Asset"
+msgstr "已匹配檔案"
+
+msgid "Resolved URL"
+msgstr "實際下載位址"

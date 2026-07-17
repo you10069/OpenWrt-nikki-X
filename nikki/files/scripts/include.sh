@@ -29,6 +29,12 @@ INCLUDE_SH="$SH_DIR/include.sh"
 MIXIN_SH="$SH_DIR/mixin.sh"
 FIREWALL_FW3_SH="$SH_DIR/firewall_fw3.sh"
 FIREWALL_INCLUDE_SH="$SH_DIR/firewall_include.sh"
+CORE_UPDATE_SH="$SH_DIR/core_update.sh"
+
+# managed Mihomo core slots
+CORE_DIR="/usr/libexec/nikki"
+CORE_ACTIVE="$CORE_DIR/mihomo"
+CORE_PREVIOUS="$CORE_DIR/mihomo.prev"
 
 # ipset data
 IPSET_DIR="$HOME_DIR/ipset"

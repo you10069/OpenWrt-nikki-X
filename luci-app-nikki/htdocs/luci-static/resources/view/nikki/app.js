@@ -3,6 +3,7 @@
 'require view';
 'require uci';
 'require poll';
+'require ui';
 'require tools.nikki as nikki';
 
 function renderStatus(running) {
@@ -17,11 +18,62 @@ function updateStatus(element, running) {
     return element;
 }
 
+function textOrDash(value) {
+    return value || '-';
+}
+
+function coreStatusText(info) {
+    const labels = {
+        idle: _('Not Checked'),
+        checked: _('Checked'),
+        updating: _('Updating'),
+        success: _('Update Successful'),
+        error: _('Update Failed'),
+        rolled_back: _('Rolled Back'),
+        previous_deleted: _('Previous Version Deleted')
+    };
+    let text = labels[info.status] || textOrDash(info.status);
+    if (info.updated_at)
+        text += ` · ${info.updated_at}`;
+    if (info.error)
+        text += ` · ${info.error}`;
+    return text;
+}
+
+function runCoreAction(action, event, successMessage) {
+    const button = event?.currentTarget;
+    if (button)
+        button.disabled = true;
+
+    return nikki.coreAction(action).then(function (result) {
+        if (!result?.success)
+            throw new Error(result?.error_message || result?.error || _('Core operation failed'));
+        ui.addNotification(null, E('p', {}, [successMessage]));
+        window.setTimeout(function () { window.location.reload(); }, 250);
+    }).catch(function (error) {
+        if (button)
+            button.disabled = false;
+        ui.addNotification(null, E('p', {}, [error.message || String(error)]), 'danger');
+    });
+}
+
+function actionButton(title, style, action, enabled, successMessage) {
+    return E('button', {
+        class: `cbi-button cbi-button-${style}`,
+        disabled: enabled ? null : '',
+        click: function (event) {
+            event.preventDefault();
+            return runCoreAction(action, event, successMessage);
+        }
+    }, [title]);
+}
+
 return view.extend({
     load: function () {
         return Promise.all([
             uci.load('nikki'),
             nikki.version(),
+            nikki.coreStatus(),
             nikki.status(),
             nikki.listProfiles()
         ]);
@@ -29,9 +81,10 @@ return view.extend({
     render: function (data) {
         const subscriptions = uci.sections('nikki', 'subscription');
         const appVersion = data[1].app ?? '';
-        const coreVersion = data[1].core ?? '';
-        const running = data[2];
-        const profiles = data[3];
+        const coreInfo = data[2] || {};
+        const running = data[3];
+        const profiles = data[4];
+        const architecture = [coreInfo.architecture_uname, coreInfo.architecture_package].filter(Boolean).join(' / ');
 
         let m, s, o;
 
@@ -42,54 +95,87 @@ return view.extend({
 
         o = s.option(form.Value, '_app_version', _('App Version'));
         o.readonly = true;
-        o.load = function () {
-            return appVersion;
-        };
+        o.load = function () { return appVersion; };
         o.write = function () { };
 
-        o = s.option(form.Value, '_core_version', _('Core Version'));
+        o = s.option(form.Value, '_device_architecture', _('Device Architecture'));
         o.readonly = true;
-        o.load = function () {
-            return coreVersion;
+        o.load = function () { return textOrDash(architecture); };
+        o.write = function () { };
+
+        o = s.option(form.Value, '_core_version', _('Current Running Version'));
+        o.readonly = true;
+        o.load = function () { return textOrDash(coreInfo.current_version); };
+        o.write = function () { };
+
+        o = s.option(form.DummyValue, '_previous_version', _('Previous Version'));
+        o.cfgvalue = function () {
+            return E('div', { style: 'display:flex;align-items:center;gap:.5rem;flex-wrap:wrap' }, [
+                E('span', {}, [textOrDash(coreInfo.previous_version)]),
+                actionButton(_('Rollback'), 'action', 'rollback', !!coreInfo.previous_version, _('Core rollback completed.')),
+                actionButton(_('Delete'), 'negative', 'delete-previous', !!coreInfo.previous_version, _('Previous core deleted.'))
+            ]);
         };
+
+        o = s.option(form.Value, '_latest_version', _('Latest Version'));
+        o.readonly = true;
+        o.load = function () { return textOrDash(coreInfo.latest_version); };
+        o.write = function () { };
+
+        o = s.option(form.Value, '_update_source', _('Update Source'));
+        o.readonly = true;
+        o.load = function () { return textOrDash(coreInfo.source); };
+        o.write = function () { };
+
+        o = s.option(form.Value, '_resolved_asset', _('Resolved Asset'));
+        o.readonly = true;
+        o.load = function () { return textOrDash(coreInfo.resolved_asset); };
+        o.write = function () { };
+
+        o = s.option(form.Value, '_resolved_url', _('Resolved URL'));
+        o.readonly = true;
+        o.load = function () { return textOrDash(coreInfo.resolved_url); };
+        o.write = function () { };
+
+        o = s.option(form.Value, '_update_status', _('Update Status'));
+        o.readonly = true;
+        o.load = function () { return coreStatusText(coreInfo); };
         o.write = function () { };
 
         o = s.option(form.DummyValue, '_core_status', _('Core Status'));
-        o.cfgvalue = function () {
-            return renderStatus(running);
-        };
+        o.cfgvalue = function () { return renderStatus(running); };
         poll.add(function () {
-            return L.resolveDefault(nikki.status()).then(function (running) {
-                updateStatus(document.getElementById('core_status'), running);
+            return L.resolveDefault(nikki.status()).then(function (isRunning) {
+                updateStatus(document.getElementById('core_status'), isRunning);
             });
         });
+
+        o = s.option(form.DummyValue, '_core_update_actions', _('Core Update'));
+        o.cfgvalue = function () {
+            return E('div', { style: 'display:flex;gap:.5rem;flex-wrap:wrap' }, [
+                actionButton(_('Check Update'), 'action', 'check', true, _('Update source checked.')),
+                actionButton(_('Update Core'), 'positive', 'update', true, _('Core updated successfully.'))
+            ]);
+        };
 
         o = s.option(form.Button, 'reload');
         o.inputstyle = 'action';
         o.inputtitle = _('Reload Service');
-        o.onclick = function () {
-            return nikki.reload();
-        };
+        o.onclick = function () { return nikki.reload(); };
 
         o = s.option(form.Button, 'restart');
         o.inputstyle = 'negative';
         o.inputtitle = _('Restart Service');
-        o.onclick = function () {
-            return nikki.restart();
-        };
+        o.onclick = function () { return nikki.restart(); };
 
         o = s.option(form.Button, 'update_dashboard');
         o.inputstyle = 'positive';
         o.inputtitle = _('Update Dashboard');
-        o.onclick = function () {
-            return nikki.updateDashboard();
-        };
+        o.onclick = function () { return nikki.updateDashboard(); };
 
         o = s.option(form.Button, 'open_dashboard');
         o.inputtitle = _('Open Dashboard');
-        o.onclick = function () {
-            return nikki.openDashboard();
-        };
+        o.onclick = function () { return nikki.openDashboard(); };
 
         s = m.section(form.NamedSection, 'config', 'config', _('App Config'));
 
@@ -99,13 +185,11 @@ return view.extend({
         o = s.option(form.ListValue, 'profile', _('Choose Profile'));
         o.optional = true;
 
-        for (const profile of profiles) {
+        for (const profile of profiles)
             o.value('file:' + profile.name, _('File:') + profile.name);
-        };
 
-        for (const subscription of subscriptions) {
+        for (const subscription of subscriptions)
             o.value('subscription:' + subscription['.name'], _('Subscription:') + subscription.name);
-        };
 
         o = s.option(form.Value, 'start_delay', _('Start Delay'));
         o.datatype = 'uinteger';
@@ -124,6 +208,71 @@ return view.extend({
 
         o = s.option(form.Flag, 'core_only', _('Core Only'));
         o.rmempty = false;
+
+        s = m.section(form.NamedSection, 'core_update', 'core_update', _('Mihomo Core Update'));
+        s.description = _('The active and previous cores are stored in two fixed slots. A downloaded core is validated before replacement; a failed restart restores both original slots.');
+
+        o = s.option(form.ListValue, 'source_type', _('Source Type'));
+        o.default = 'official';
+        o.rmempty = false;
+        o.value('official', _('Official MetaCubeX Releases'));
+        o.value('repository', _('ShellCrash Sources'));
+        o.value('release', _('Custom Releases URL'));
+        o.value('direct', _('Exact Direct URL'));
+
+        o = s.option(form.ListValue, 'repository_preset', _('ShellCrash Source'));
+        o.default = 'auto';
+        o.rmempty = false;
+        o.depends('source_type', 'repository');
+        o.value('auto', _('Automatic HTTPS Fallback (Recommended)'));
+        o.value('cloudflare', _('Cloudflare jsDelivr (Recommended by ShellCrash)'));
+        o.value('jsdelivr', _('jsDelivr CDN'));
+        o.value('github', _('GitHub Raw'));
+        o.value('author_https', _('Author HTTPS Mirror'));
+        o.value('author_http', _('Author HTTP Beta Source (Unsafe)'));
+        o.value('custom', _('Custom ShellCrash-Compatible Repository'));
+        o.description = _('Automatic mode tries all four HTTPS sources and never falls back to the unencrypted HTTP beta source.');
+
+        o = s.option(form.Value, 'repository_url', _('Custom Repository Base URL'));
+        o.placeholder = 'https://example.com';
+        o.depends({ source_type: 'repository', repository_preset: 'custom' });
+        o.rmempty = false;
+
+        o = s.option(form.Value, 'releases_url', _('Releases URL'));
+        o.placeholder = 'https://example.com/releases';
+        o.depends('source_type', 'release');
+        o.rmempty = false;
+
+        o = s.option(form.Value, 'releases_tag', _('Release Tag'));
+        o.default = 'latest';
+        o.placeholder = 'latest / v1.19.16';
+        o.depends('source_type', 'release');
+        o.rmempty = false;
+
+        o = s.option(form.Value, 'direct_url', _('Exact Direct URL'));
+        o.placeholder = 'https://example.com/mihomo-linux-aarch64_cortex-a53.tar.gz';
+        o.depends('source_type', 'direct');
+        o.rmempty = false;
+
+        o = s.option(form.Value, 'user_agent', _('User Agent'));
+        o.default = 'nikki-core-updater';
+        o.rmempty = false;
+
+        o = s.option(form.Value, 'timeout', _('Download Timeout'));
+        o.datatype = 'range(1, 3600)';
+        o.default = '120';
+        o.rmempty = false;
+
+        o = s.option(form.Value, 'retry', _('Download Retry'));
+        o.datatype = 'uinteger';
+        o.default = '2';
+        o.rmempty = false;
+
+        o = s.option(form.Value, 'min_free_kb', _('Minimum Free Space'));
+        o.datatype = 'uinteger';
+        o.default = '32768';
+        o.rmempty = false;
+        o.description = _('In KiB. Insufficient storage returns an error without replacing either core slot.');
 
         s = m.section(form.NamedSection, 'procd', 'procd', _('procd Config'));
 

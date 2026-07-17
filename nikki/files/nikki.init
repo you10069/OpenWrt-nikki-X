@@ -4,7 +4,7 @@ START=99
 STOP=10
 USE_PROCD=1
 
-PROG="/usr/bin/mihomo"
+PROG="/usr/libexec/nikki/mihomo"
 
 . "$IPKG_INSTROOT/etc/nikki/scripts/include.sh"
 
@@ -84,6 +84,21 @@ legacy_modes_valid() {
 
 extra_command 'update_subscription' 'Update subscription by section id'
 extra_command 'clear_logs' 'Clear logs if size exceeds the limit'
+extra_command 'update_core' 'Update the managed Mihomo core'
+extra_command 'rollback_core' 'Swap the active and previous Mihomo cores'
+extra_command 'delete_previous_core' 'Delete the previous Mihomo core'
+
+update_core() {
+	"$CORE_UPDATE_SH" update
+}
+
+rollback_core() {
+	"$CORE_UPDATE_SH" rollback
+}
+
+delete_previous_core() {
+	"$CORE_UPDATE_SH" delete-previous
+}
 
 boot_func() {
 	# prepare files
@@ -122,8 +137,10 @@ start_service() {
 	# start
 	log "App" "Enabled."
 	log "App" "Start."
+	# migrate a package-provided legacy core into the managed active slot once.
+	[ -x "$CORE_UPDATE_SH" ] && "$CORE_UPDATE_SH" migrate >/dev/null 2>&1 || :
 	# check if executable
-	if [ ! -x $PROG ]; then
+	if [ ! -x "$PROG" ]; then
 		log "App" "Core is not executable."
 		log "App" "Exit."
 		return
@@ -163,12 +180,13 @@ start_service() {
 	config_get_bool env_skip_system_ipv6_check "procd" "env_skip_system_ipv6_check" 0
 	## mixin config
 	### overwrite
-	local overwrite_authentication overwrite_tun_dns_hijack overwrite_fake_ip_filter overwrite_hosts overwrite_dns_nameserver overwrite_dns_nameserver_policy overwrite_sniffer_sniff overwrite_sniffer_force_domain_name overwrite_sniffer_ignore_domain_name
+	local overwrite_authentication overwrite_tun_dns_hijack overwrite_fake_ip_filter overwrite_hosts overwrite_dns_nameserver overwrite_dns_proxy_server_nameserver_policy overwrite_dns_nameserver_policy overwrite_sniffer_sniff overwrite_sniffer_force_domain_name overwrite_sniffer_ignore_domain_name
 	config_get_bool overwrite_authentication "mixin" "authentication" 0
 	config_get_bool overwrite_tun_dns_hijack "mixin" "tun_dns_hijack" 0
 	config_get_bool overwrite_fake_ip_filter "mixin" "fake_ip_filter" 0
 	config_get_bool overwrite_hosts "mixin" "hosts" 0
 	config_get_bool overwrite_dns_nameserver "mixin" "dns_nameserver" 0
+	config_get_bool overwrite_dns_proxy_server_nameserver_policy "mixin" "dns_proxy_server_nameserver_policy" 0
 	config_get_bool overwrite_dns_nameserver_policy "mixin" "dns_nameserver_policy" 0
 	config_get_bool overwrite_sniffer_force_domain_name "mixin" "sniffer_force_domain_name" 0
 	config_get_bool overwrite_sniffer_ignore_domain_name "mixin" "sniffer_ignore_domain_name" 0
@@ -249,6 +267,9 @@ start_service() {
 		fi
 		if [ "$overwrite_dns_nameserver" = 1 ]; then
 			yq -M -i 'del(.dns.default-nameserver) | del(.dns.proxy-server-nameserver) | del(.dns.direct-nameserver) | del(.dns.nameserver) | del(.dns.fallback) ' "$RUN_PROFILE_PATH"
+		fi
+		if [ "$overwrite_dns_proxy_server_nameserver_policy" = 1 ]; then
+			yq -M -i 'del(.dns.proxy-server-nameserver-policy)' "$RUN_PROFILE_PATH"
 		fi
 		if [ "$overwrite_dns_nameserver_policy" = 1 ]; then
 			yq -M -i 'del(.dns.nameserver-policy)' "$RUN_PROFILE_PATH"
@@ -369,7 +390,12 @@ start_service() {
 
 	procd_close_instance
 	# cron
-	local reload_cron; reload_cron=0
+	local reload_cron; reload_cron=1
+	# Rebuild Nikki-owned cron entries on every successful start. This keeps the
+	# operation idempotent after abrupt power loss or an interrupted stop path.
+	mkdir -p /etc/crontabs
+	touch /etc/crontabs/root
+	sed -i '/#nikki/d' /etc/crontabs/root
 	if [ "$scheduled_restart" = 1 ] && [ -n "$scheduled_restart_cron" ]; then
 		log "App" "Set scheduled restart."
 		echo "$scheduled_restart_cron /etc/init.d/nikki restart #nikki scheduled restart" >> "/etc/crontabs/root"
@@ -426,15 +452,22 @@ service_started() {
 		config_get tun_listener_name core tun_listener_name tun-in
 		config_get tun_timeout proxy tun_timeout 30
 		config_get tun_interval proxy tun_interval 1
+		case "$tun_timeout" in ''|*[!0-9]*|0) tun_timeout=30 ;; esac
+		case "$tun_interval" in ''|*[!0-9]*|0) tun_interval=1 ;; esac
+		[ "$tun_interval" -le "$tun_timeout" ] || tun_interval="$tun_timeout"
 		tun_device="$(TUN_LISTENER="$tun_listener_name" yq -M -r '(.tun | select(.enable == true) | .device) // (.listeners[]? | select(.name == env(TUN_LISTENER) and .type == "tun") | .device) // ""' "$RUN_PROFILE_PATH" 2>/dev/null)"
 		[ -n "$tun_device" ] || { log "Routing" "TUN device is not configured."; return 1; }
 		log "Routing" "Waiting for TUN device $tun_device..."
-		while [ "$tun_timeout" -gt 0 ]; do
+		local tun_remaining tun_sleep
+		tun_remaining="$tun_timeout"
+		while :; do
 			if ip link show dev "$tun_device" 2>/dev/null | grep -q 'UP'; then break; fi
-			tun_timeout=$((tun_timeout - tun_interval))
-			sleep "$tun_interval"
+			[ "$tun_remaining" -gt 0 ] || { log "Routing" "TUN device did not become ready."; return 1; }
+			tun_sleep="$tun_interval"
+			[ "$tun_sleep" -le "$tun_remaining" ] || tun_sleep="$tun_remaining"
+			sleep "$tun_sleep"
+			tun_remaining=$((tun_remaining - tun_sleep))
 		done
-		[ "$tun_timeout" -gt 0 ] || { log "Routing" "TUN device did not become ready."; return 1; }
 	fi
 
 	if [ "$ipv4_tproxy_active" -eq 1 ] && ! add_tproxy_policy_route 4 "$tproxy_fw_mark" "$tproxy_fw_mask" "$tproxy_rule_pref" "$tproxy_route_table"; then

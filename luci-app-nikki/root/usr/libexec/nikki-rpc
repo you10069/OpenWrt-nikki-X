@@ -9,6 +9,8 @@ HOME_DIR="/etc/nikki"
 RUN_PROFILE="$HOME_DIR/run/config.yaml"
 TMP_DIR="/var/run/nikki"
 DEBUG_LOG="/var/log/nikki/debug.log"
+CORE_UPDATER="/etc/nikki/scripts/core_update.sh"
+CORE_ACTIVE="/usr/libexec/nikki/mihomo"
 
 json_success() {
 	json_init
@@ -47,13 +49,54 @@ version() {
 	if command -v opkg >/dev/null 2>&1; then
 		app="$(opkg list-installed luci-app-nikki 2>/dev/null | awk '{print $3; exit}')"
 	fi
-	if command -v mihomo >/dev/null 2>&1; then
-		core="$(mihomo -v 2>/dev/null | awk '/Mihomo/ {print $3; exit}')"
+	if [ -x "$CORE_ACTIVE" ]; then
+		core="$("$CORE_ACTIVE" -v 2>/dev/null | sed -n 's/.*\(v[0-9][0-9A-Za-z._+-]*\).*/\1/p' | head -n 1)"
 	fi
 	json_init
 	json_add_string app "$app"
 	json_add_string core "$core"
 	json_dump
+}
+
+add_core_status_fields() {
+	local status_file key value tab
+	status_file="$TMP_DIR/core-status.$$"
+	mkdir -p "$TMP_DIR"
+	"$CORE_UPDATER" status > "$status_file" 2>/dev/null || :
+	tab="$(printf '\t')"
+	while IFS="$tab" read -r key value; do
+		case "$key" in
+			architecture_uname|architecture_package|current_version|previous_version|latest_version|source|status|error|updated_at|resolved_url|resolved_asset|resolved_repository_base|active_path|previous_path)
+				json_add_string "$key" "$value"
+				;;
+		esac
+	done < "$status_file"
+	rm -f "$status_file"
+}
+
+core_status() {
+	json_init
+	json_add_boolean success 1
+	add_core_status_fields
+	json_dump
+}
+
+core_action() {
+	local action="$1" output rc error
+	case "$action" in check|update|rollback|delete-previous) ;; *) json_failure "invalid core action"; return 0 ;; esac
+	output="$("$CORE_UPDATER" "$action" 2>&1)"
+	rc=$?
+	json_init
+	if [ "$rc" -eq 0 ]; then
+		json_add_boolean success 1
+	else
+		json_add_boolean success 0
+		error="$(printf '%s\n' "$output" | tail -n 1)"
+		[ -n "$error" ] && json_add_string error_message "$error"
+	fi
+	add_core_status_fields
+	json_dump
+	return 0
 }
 
 profile() {
@@ -112,6 +155,8 @@ api() {
 	case "$listen" in
 		http://0.0.0.0:*) listen="http://127.0.0.1:${listen##*:}" ;;
 		https://0.0.0.0:*) listen="https://127.0.0.1:${listen##*:}" ;;
+		http://\[::\]:*) listen="http://127.0.0.1:${listen##*:}" ;;
+		https://\[::\]:*) listen="https://127.0.0.1:${listen##*:}" ;;
 	esac
 
 	case "$listen" in
@@ -156,16 +201,39 @@ debug() {
 }
 
 write_file() {
-	local path="$1" data="$2" append="${3:-0}" mode="${4:-644}"
+	local path="$1" data="$2" append="${3:-0}" mode="${4:-644}" final="${5-}" staging
 	allowed_write_path "$path" || { json_failure "path is not allowed"; return 1; }
 	case "$mode" in ''|*[!0-7]*) mode=644 ;; esac
+	case "$append" in 0|1) ;; *) json_failure "invalid append flag"; return 1 ;; esac
 	mkdir -p "$(dirname "$path")" || { json_failure "mkdir failed"; return 1; }
-	if [ "$append" = 1 ]; then
-		printf '%s' "$data" >> "$path" || { json_failure "write failed"; return 1; }
-	else
-		printf '%s' "$data" > "$path" || { json_failure "write failed"; return 1; }
+
+	# Compatibility with a pre-5.3 LuCI client, which does not send a final
+	# flag. New clients stage every chunk beside the destination and atomically
+	# publish the complete file only after the final chunk arrives.
+	if [ -z "$final" ]; then
+		if [ "$append" = 1 ]; then
+			printf '%s' "$data" >> "$path" || { json_failure "write failed"; return 1; }
+		else
+			printf '%s' "$data" > "$path" || { json_failure "write failed"; return 1; }
+		fi
+		chmod "$mode" "$path" 2>/dev/null
+		json_success
+		return 0
 	fi
-	chmod "$mode" "$path" 2>/dev/null
+
+	case "$final" in 0|1) ;; *) json_failure "invalid final flag"; return 1 ;; esac
+	staging="${path}.nikki-write"
+	if [ "$append" = 1 ]; then
+		[ -f "$staging" ] || { json_failure "staged write is missing"; return 1; }
+		printf '%s' "$data" >> "$staging" || { json_failure "write failed"; return 1; }
+	else
+		umask 077
+		printf '%s' "$data" > "$staging" || { json_failure "write failed"; return 1; }
+	fi
+	if [ "$final" = 1 ]; then
+		chmod "$mode" "$staging" 2>/dev/null || { rm -f "$staging"; json_failure "chmod failed"; return 1; }
+		mv -f "$staging" "$path" || { rm -f "$staging"; json_failure "publish failed"; return 1; }
+	fi
 	json_success
 }
 
@@ -173,9 +241,11 @@ case "$1" in
 	version) version ;;
 	profile) profile "$2" ;;
 	update-subscription) update_subscription "$2" ;;
+	core-status) core_status ;;
+	core-action) core_action "$2" ;;
 	api) api "$2" "$3" "$4" "$5" ;;
 	identifiers) identifiers ;;
 	debug) debug ;;
-	write-file) write_file "$2" "$3" "$4" "$5" ;;
+	write-file) write_file "$2" "$3" "$4" "$5" "$6" ;;
 	*) json_failure "unknown action"; exit 2 ;;
 esac

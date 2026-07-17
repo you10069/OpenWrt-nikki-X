@@ -218,7 +218,16 @@ section_core=$(uci -q get nikki.core); [ -z "$section_core" ] && {
 
 # since v1.25.3
 
-config_scheduled_restart_cron=$(uci -q get nikki.config.scheduled_restart_cron); [ -z "$config_scheduled_restart_cron" ] && uci rename nikki.config.cron_expression="scheduled_restart_cron"
+config_scheduled_restart_cron=$(uci -q get nikki.config.scheduled_restart_cron)
+if [ -z "$config_scheduled_restart_cron" ]; then
+	config_legacy_cron_expression=$(uci -q get nikki.config.cron_expression)
+	if [ -n "$config_legacy_cron_expression" ]; then
+		uci rename nikki.config.cron_expression="scheduled_restart_cron"
+	else
+		uci set nikki.config.scheduled_restart_cron='0 3 * * *'
+	fi
+fi
+config_scheduled_restart=$(uci -q get nikki.config.scheduled_restart); [ -n "$config_scheduled_restart" ] || uci set nikki.config.scheduled_restart=1
 
 log_scheduled_clear=$(uci -q get nikki.log.scheduled_clear); [ -z "$log_scheduled_clear" ] && uci set nikki.log.scheduled_clear=1
 log_scheduled_clear_cron=$(uci -q get nikki.log.scheduled_clear_cron); [ -z "$log_scheduled_clear_cron" ] && uci set nikki.log.scheduled_clear_cron="*/5 * * * *"
@@ -234,9 +243,11 @@ config_clear_at_stop=$(uci -q get nikki.log.clear_at_stop); [ -z "$config_clear_
 routing_core_fw_mark=$(uci -q get nikki.routing.core_fw_mark); [ -z "$routing_core_fw_mark" ] && uci set nikki.routing.core_fw_mark=0x82
 routing_core_fw_mask=$(uci -q get nikki.routing.core_fw_mask); [ -z "$routing_core_fw_mask" ] && uci set nikki.routing.core_fw_mask=0xFF
 
-# Legacy v2 introduced a dual-stack DNS listen default. Legacy v3 uses
-# TPROXY for IPv6 DNS, but preserves this harmless dual-stack default.
+# IPv4 DNS REDIRECT requires a deterministic Mihomo DNS listener. Keep the
+# dual-stack 1053 default when the field is absent, while preserving any
+# explicitly configured custom listener.
 mixin_dns_listen=$(uci -q get nikki.mixin.dns_listen)
+[ -n "$mixin_dns_listen" ] || uci set nikki.mixin.dns_listen='[::]:1053'
 [ "$mixin_dns_listen" = '0.0.0.0:1053' ] && uci set nikki.mixin.dns_listen='[::]:1053'
 
 # Nikki Legacy v4: independent per-family/per-protocol modes and TUN routing.
@@ -258,10 +269,10 @@ if [ -z "$legacy_ipv4_tcp_mode" ]; then
 fi
 
 [ -n "$(uci -q get nikki.proxy.ipv4_udp_mode)" ] || uci set nikki.proxy.ipv4_udp_mode=tproxy
-[ -n "$(uci -q get nikki.proxy.ipv6_tcp_mode)" ] || uci set nikki.proxy.ipv6_tcp_mode=disable
-[ -n "$(uci -q get nikki.proxy.ipv6_udp_mode)" ] || uci set nikki.proxy.ipv6_udp_mode=disable
+[ -n "$(uci -q get nikki.proxy.ipv6_tcp_mode)" ] || uci set nikki.proxy.ipv6_tcp_mode=tproxy
+[ -n "$(uci -q get nikki.proxy.ipv6_udp_mode)" ] || uci set nikki.proxy.ipv6_udp_mode=tproxy
 [ -n "$(uci -q get nikki.proxy.ipv4_dns_mode)" ] || uci set nikki.proxy.ipv4_dns_mode=redirect
-[ -n "$(uci -q get nikki.proxy.ipv6_dns_mode)" ] || uci set nikki.proxy.ipv6_dns_mode=disable
+[ -n "$(uci -q get nikki.proxy.ipv6_dns_mode)" ] || uci set nikki.proxy.ipv6_dns_mode=tproxy
 [ -n "$(uci -q get nikki.proxy.tun_timeout)" ] || uci set nikki.proxy.tun_timeout=30
 [ -n "$(uci -q get nikki.proxy.tun_interval)" ] || uci set nikki.proxy.tun_interval=1
 
@@ -271,6 +282,36 @@ uci -q delete nikki.proxy.ipv4_proxy
 uci -q delete nikki.proxy.ipv6_proxy
 uci -q delete nikki.proxy.ipv4_dns_hijack
 uci -q delete nikki.proxy.ipv6_dns_hijack
+
+# Nikki Legacy v5: managed Mihomo core updater and two core slots.
+section_core_update=$(uci -q get nikki.core_update); [ -z "$section_core_update" ] && {
+	uci set nikki.core_update=core_update
+	uci set nikki.core_update.source_type=official
+	uci set nikki.core_update.official_repository=MetaCubeX/mihomo
+	uci set nikki.core_update.repository_preset=auto
+	uci set nikki.core_update.repository_url=''
+	uci set nikki.core_update.releases_url='https://github.com/MetaCubeX/mihomo/releases'
+	uci set nikki.core_update.releases_tag=latest
+	uci set nikki.core_update.direct_url=''
+	uci set nikki.core_update.user_agent=nikki-core-updater
+	uci set nikki.core_update.timeout=120
+	uci set nikki.core_update.retry=2
+	uci set nikki.core_update.min_free_kb=32768
+}
+
+# Legacy v5 had only repository_url. Persist the same interpretation used by
+# the backend so LuCI and the updater show and use the identical source.
+core_update_repository_preset=$(uci -q get nikki.core_update.repository_preset)
+if [ -z "$core_update_repository_preset" ]; then
+	core_update_repository_url=$(uci -q get nikki.core_update.repository_url)
+	if [ -n "$core_update_repository_url" ]; then
+		uci set nikki.core_update.repository_preset=custom
+	else
+		uci set nikki.core_update.repository_preset=auto
+	fi
+fi
+
+[ -x "$CORE_UPDATE_SH" ] && "$CORE_UPDATE_SH" migrate >/dev/null 2>&1 || :
 
 # commit
 uci commit nikki
