@@ -1,5 +1,18 @@
 # Nikki Legacy changelog
 
+## 2026.04.08.legacy4
+
+- Split transparent proxy settings into independent IPv4/IPv6 TCP, UDP and DNS modes.
+- Added IPv4 TCP TPROXY while retaining REDIRECT and adding TUN selection.
+- Kept IPv4 DNS REDIRECT targeted at Mihomo `dns.listen`.
+- Defined IPv6 DNS as ordinary TCP/UDP 53 TPROXY traffic sent to Mihomo `tproxy-port`.
+- Added explicit IPv4/IPv6 TUN mangle chains, router OUTPUT marking and a dedicated TUN fwmark/route table.
+- Added IPv4/IPv6 filter chains that accept traffic entering from or forwarding through the Mihomo TUN device.
+- Disabled Mihomo automatic TUN routing/redirect and installed explicit policy routes with rollback on failure.
+- Added TUN device readiness checks, timeout/interval settings and cleanup of TUN rules/routes.
+- Added v1-v3 UCI migration to the independent mode fields.
+- Expanded LuCI labels, translations, debug output and regression tests for TUN and independent modes.
+
 ## 2026.04.08.legacy3
 
 - Removed every IPv6 nat/REDIRECT rule and all `NIK_NAT_*_V6` chains.

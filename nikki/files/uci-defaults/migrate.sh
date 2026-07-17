@@ -239,6 +239,39 @@ routing_core_fw_mask=$(uci -q get nikki.routing.core_fw_mask); [ -z "$routing_co
 mixin_dns_listen=$(uci -q get nikki.mixin.dns_listen)
 [ "$mixin_dns_listen" = '0.0.0.0:1053' ] && uci set nikki.mixin.dns_listen='[::]:1053'
 
+# Nikki Legacy v4: independent per-family/per-protocol modes and TUN routing.
+legacy_ipv4_tcp_mode=$(uci -q get nikki.proxy.ipv4_tcp_mode)
+if [ -z "$legacy_ipv4_tcp_mode" ]; then
+	old_tcp_mode=$(uci -q get nikki.proxy.tcp_mode); [ -n "$old_tcp_mode" ] || old_tcp_mode=redirect
+	old_udp_mode=$(uci -q get nikki.proxy.udp_mode); [ -n "$old_udp_mode" ] || old_udp_mode=tproxy
+	old_ipv4_proxy=$(uci -q get nikki.proxy.ipv4_proxy); [ -n "$old_ipv4_proxy" ] || old_ipv4_proxy=1
+	old_ipv6_proxy=$(uci -q get nikki.proxy.ipv6_proxy); [ -n "$old_ipv6_proxy" ] || old_ipv6_proxy=0
+	old_ipv4_dns=$(uci -q get nikki.proxy.ipv4_dns_hijack); [ -n "$old_ipv4_dns" ] || old_ipv4_dns=1
+	old_ipv6_dns=$(uci -q get nikki.proxy.ipv6_dns_hijack); [ -n "$old_ipv6_dns" ] || old_ipv6_dns=0
+
+	[ "$old_ipv4_proxy" = 1 ] && uci set nikki.proxy.ipv4_tcp_mode="$old_tcp_mode" || uci set nikki.proxy.ipv4_tcp_mode=disable
+	[ "$old_ipv4_proxy" = 1 ] && uci set nikki.proxy.ipv4_udp_mode="$old_udp_mode" || uci set nikki.proxy.ipv4_udp_mode=disable
+	[ "$old_ipv6_proxy" = 1 ] && uci set nikki.proxy.ipv6_tcp_mode=tproxy || uci set nikki.proxy.ipv6_tcp_mode=disable
+	[ "$old_ipv6_proxy" = 1 ] && uci set nikki.proxy.ipv6_udp_mode=tproxy || uci set nikki.proxy.ipv6_udp_mode=disable
+	[ "$old_ipv4_dns" = 1 ] && uci set nikki.proxy.ipv4_dns_mode=redirect || uci set nikki.proxy.ipv4_dns_mode=disable
+	[ "$old_ipv6_dns" = 1 ] && uci set nikki.proxy.ipv6_dns_mode=tproxy || uci set nikki.proxy.ipv6_dns_mode=disable
+fi
+
+[ -n "$(uci -q get nikki.proxy.ipv4_udp_mode)" ] || uci set nikki.proxy.ipv4_udp_mode=tproxy
+[ -n "$(uci -q get nikki.proxy.ipv6_tcp_mode)" ] || uci set nikki.proxy.ipv6_tcp_mode=disable
+[ -n "$(uci -q get nikki.proxy.ipv6_udp_mode)" ] || uci set nikki.proxy.ipv6_udp_mode=disable
+[ -n "$(uci -q get nikki.proxy.ipv4_dns_mode)" ] || uci set nikki.proxy.ipv4_dns_mode=redirect
+[ -n "$(uci -q get nikki.proxy.ipv6_dns_mode)" ] || uci set nikki.proxy.ipv6_dns_mode=disable
+[ -n "$(uci -q get nikki.proxy.tun_timeout)" ] || uci set nikki.proxy.tun_timeout=30
+[ -n "$(uci -q get nikki.proxy.tun_interval)" ] || uci set nikki.proxy.tun_interval=1
+
+uci -q delete nikki.proxy.tcp_mode
+uci -q delete nikki.proxy.udp_mode
+uci -q delete nikki.proxy.ipv4_proxy
+uci -q delete nikki.proxy.ipv6_proxy
+uci -q delete nikki.proxy.ipv4_dns_hijack
+uci -q delete nikki.proxy.ipv6_dns_hijack
+
 # commit
 uci commit nikki
 

@@ -1129,5 +1129,38 @@ msgstr "procd 設定"
 msgid "Legacy Backend"
 msgstr "舊版後端"
 
-msgid "IPv4: TCP Redirect + UDP TPROXY (firewall3/iptables)"
-msgstr "IPv4：TCP 重新導向 + UDP TPROXY（firewall3/iptables）"
+msgid "IPv4 TCP Mode"
+msgstr "IPv4 TCP 模式"
+
+msgid "IPv4 UDP Mode"
+msgstr "IPv4 UDP 模式"
+
+msgid "IPv6 TCP Mode"
+msgstr "IPv6 TCP 模式"
+
+msgid "IPv6 UDP Mode"
+msgstr "IPv6 UDP 模式"
+
+msgid "IPv4 DNS Mode"
+msgstr "IPv4 DNS 模式"
+
+msgid "IPv6 DNS Mode"
+msgstr "IPv6 DNS 模式"
+
+msgid "REDIRECT to Mihomo DNS"
+msgstr "重新導向至 Mihomo DNS"
+
+msgid "TUN Device Timeout"
+msgstr "TUN 裝置等待逾時"
+
+msgid "TUN Device Check Interval"
+msgstr "TUN 裝置檢查間隔"
+
+msgid "REDIRECT TCP/UDP port 53 to the Mihomo DNS listener."
+msgstr "將 TCP/UDP 53 連接埠重新導向至 Mihomo DNS 監聽連接埠。"
+
+msgid "TPROXY TCP/UDP port 53 to the Mihomo TPROXY listener as ordinary transparent traffic; it does not enter the built-in DNS listener."
+msgstr "將 TCP/UDP 53 連接埠作為一般透明流量 TPROXY 至 Mihomo TPROXY 監聽連接埠；不會進入內建 DNS 監聽連接埠。"
+
+msgid "IPv4 TCP: REDIRECT / TPROXY / TUN; IPv4 UDP: TPROXY / TUN; IPv6 TCP/UDP: TPROXY / TUN; IPv4 DNS: REDIRECT to Mihomo DNS; IPv6 DNS: TPROXY as transparent traffic."
+msgstr "IPv4 TCP：REDIRECT / TPROXY / TUN；IPv4 UDP：TPROXY / TUN；IPv6 TCP/UDP：TPROXY / TUN；IPv4 DNS：重新導向至 Mihomo DNS；IPv6 DNS：作為透明流量透過 TPROXY。"

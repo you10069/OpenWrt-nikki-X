@@ -282,8 +282,9 @@ if [ "$authentication_enabled" -eq 1 ]; then
 	fi
 fi
 
-# TUN settings remain available for core-only use, but the first legacy
-# firewall backend intentionally supports Redirect + TPROXY only.
+# TUN settings are used by the legacy firewall backend when any per-family
+# TCP/UDP mode selects TUN. The init script disables Mihomo auto-route and
+# installs explicit fwmark policy routes instead.
 json_add_object tun
 json_add_bool_opt enable mixin tun_enabled
 json_add_string_opt device mixin tun_device

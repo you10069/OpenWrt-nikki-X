@@ -2,96 +2,119 @@
 
 这是基于 [OpenWrt-nikki](https://github.com/nikkinikki-org/OpenWrt-nikki) 改造的实验性 legacy 分支，目标是在 **OpenWrt 21.02 类系统、firewall3、iptables 和 ip6tables** 环境中运行，同时移除运行时 `ucode`、`firewall4` 和 nftables 依赖。
 
-## Legacy v3 范围
+## Legacy v4 模式矩阵
 
-已实现：
+各地址族、各协议独立选择模式：
 
-- IPv4 LAN 客户端及路由器本机 TCP `REDIRECT`；
-- IPv4 LAN UDP `TPROXY`；
-- IPv4 路由器本机 UDP：`OUTPUT MARK → IPv4 policy route → lo → PREROUTING TPROXY`；
-- IPv4 LAN 与路由器本机 DNS `REDIRECT`；
-- IPv6 LAN 与路由器本机 TCP、UDP 全部使用 `TPROXY`；
-- IPv6 TCP/UDP 53 端口通过 Mihomo TPROXY 监听器劫持；
-- IPv6 不创建 nat 表规则，不使用 `REDIRECT`，也不创建任何 `NIK_NAT_*_V6` 链；
-- 按 OpenWrt 网络接口、IPv4、IPv6、MAC、路由器用户和用户组进行访问控制；
+| 流量 | 可选模式 |
+|---|---|
+| IPv4 TCP | 关闭 / REDIRECT / TPROXY / TUN |
+| IPv4 UDP | 关闭 / TPROXY / TUN |
+| IPv6 TCP | 关闭 / TPROXY / TUN |
+| IPv6 UDP | 关闭 / TPROXY / TUN |
+| IPv4 DNS TCP/UDP 53 | 关闭 / REDIRECT 至 Mihomo `dns.listen` |
+| IPv6 DNS TCP/UDP 53 | 关闭 / TPROXY 至 Mihomo `tproxy-port`，作为普通透明代理流量 |
+
+IPv6 不访问 `ip6tables nat` 表，也不依赖 `ip6tables-mod-nat`。
+
+## 已实现
+
+- IPv4/IPv6 TCP、UDP 模式独立配置；
+- IPv4 TCP REDIRECT；
+- IPv4 TCP/UDP TPROXY；
+- IPv6 TCP/UDP TPROXY；
+- IPv4 DNS TCP/UDP 53 REDIRECT 至 Mihomo 内置 DNS 监听端口；
+- IPv6 DNS TCP/UDP 53 TPROXY 至 Mihomo 普通 TPROXY 监听端口；
+- IPv4/IPv6 TUN 路由、专用 fwmark 和独立策略路由表；
+- TUN 接口 INPUT/FORWARD 放行；
+- LAN 流量和路由器本机流量；
+- 按 OpenWrt 网络、IPv4、IPv6、MAC、本机用户和用户组进行访问控制；
 - IPv4/IPv6 保留地址、中国大陆地址、DSCP 和 fwmark 绕过；
 - Mihomo `routing-mark` 防回环；
 - firewall3 script include，在防火墙重载后恢复规则；
-- 无 ucode 的 Mihomo 配置生成；
-- 无 rpcd-ucode 的 LuCI 辅助后端。
+- `Shell + jshn + yq` 配置生成；
+- `/usr/libexec/nikki-rpc` 替代 rpcd-ucode。
 
-IPv6 代理和 IPv6 DNS 劫持默认关闭。启用任意一项都必须存在 Mihomo `tproxy-port` 或 TPROXY listener。IPv4 DNS 劫持仍然使用普通 DNS listener。
+暂未实现：cgroup ACL、多 WAN 深度集成、ICMP TUN 转发及正式发布级实体设备回归测试。
 
-暂未实现：
+## DNS 路径
 
-- TUN 数据面；
-- cgroup 访问控制；
-- 多 WAN、策略出口和复杂硬件加速兼容；
-- 正式发布级别的实体设备回归测试。
-
-## 数据路径
-
-### IPv4 TCP
+### IPv4 DNS
 
 ```text
-LAN TCP
-  → nat/PREROUTING
-  → NIK_NAT_PRE_TCP_V4
-  → REDIRECT → Mihomo redir-port
-
-Router TCP
-  → nat/OUTPUT
-  → NIK_NAT_OUT_TCP_V4
-  → REDIRECT → Mihomo redir-port
+客户端或路由器本机 TCP/UDP 53
+  → iptables nat REDIRECT
+  → Mihomo dns.listen（例如 1053）
+  → Mihomo 内置 DNS 模块
 ```
 
-### IPv4 UDP
+IPv4 DNS 会使用 fake-ip、hosts、nameserver-policy 等 Mihomo DNS 配置。
+
+### IPv6 DNS
 
 ```text
-LAN UDP
-  → mangle/PREROUTING
-  → NIK_MGL_PRE_CTRL_V4
-  → NIK_MGL_PRE_TPROXY_V4
+客户端或路由器本机 TCP/UDP 53
+  → ip6tables mangle TPROXY
   → Mihomo tproxy-port
-
-Router UDP
-  → mangle/OUTPUT
-  → NIK_MGL_OUT_MARK_V4
-  → fwmark + IPv4 policy route + lo
-  → mangle/PREROUTING
-  → NIK_MGL_PRE_TPROXY_V4
+  → 作为普通透明代理连接继续访问原始 IPv6 DNS 服务器
 ```
 
-### IPv6 TCP、UDP及DNS
+IPv6 DNS 不是送入 Mihomo 内置 DNS listener；它是强制代理 DNS 连接。这样无需增加 IPv6 NAT 模块。
+
+## TUN 转发
+
+TUN 使用独立标记和路由表：
 
 ```text
-LAN IPv6 TCP/UDP/53
-  → mangle/PREROUTING
-  → NIK_MGL_PRE_CTRL_V6
-  → NIK_MGL_PRE_TPROXY_V6
-  → Mihomo tproxy-port
-
-Router IPv6 TCP/UDP/53
-  → mangle/OUTPUT
-  → NIK_MGL_OUT_MARK_V6
-  → fwmark + IPv6 policy route + lo
-  → mangle/PREROUTING
-  → NIK_MGL_PRE_TPROXY_V6
+TPROXY mark：0x80/0xFF，路由表 80
+TUN mark：   0x81/0xFF，路由表 81
+Core mark：  0x82/0xFF
 ```
 
-IPv6 规则文件中只有：
+### LAN 流量
 
 ```text
-*mangle
+PREROUTING
+  → NIK_MGL_PRE_CTRL_V4/V6
+  → NIK_MGL_PRE_TUN_V4/V6
+  → MARK 0x81
+  → ip rule / route table 81
+  → Mihomo TUN 设备
 ```
 
-不会出现：
+### 路由器本机流量
 
 ```text
-*nat
-REDIRECT
-NIK_NAT_*_V6
+OUTPUT
+  → NIK_MGL_OUT_TUN_V4/V6
+  → MARK 0x81
+  → ip rule / route table 81
+  → Mihomo TUN 设备
 ```
+
+### TUN 接口放行
+
+```text
+NIK_FLT_IN_TUN_V4/V6
+NIK_FLT_FWD_TUN_V4/V6
+```
+
+规则允许：
+
+- 从 TUN 设备进入路由器本机；
+- 从 TUN 设备转发出去；
+- 转发到 TUN 设备。
+
+当任意 TCP/UDP 模式选择 TUN 时，启动脚本会：
+
+1. 启用生成配置中的 Mihomo TUN；
+2. 关闭 Mihomo `auto-route`、`auto-redirect` 和 `auto-detect-interface`；
+3. 等待 TUN 设备进入 UP 状态；
+4. 安装 IPv4/IPv6 TUN 策略路由；
+5. 加载 mangle 和 filter 规则；
+6. 任一步失败时撤销已创建的路由与防火墙规则。
+
+当前 legacy 后端只处理 TCP/UDP，因此设置 `disable-icmp-forwarding: true`。
 
 ## 正式链名
 
@@ -102,50 +125,26 @@ NIK_NAT_PRE_TCP_V4
 NIK_NAT_OUT_DNS_V4
 NIK_NAT_OUT_TCP_V4
 
-IPv4 mangle：
+IPv4 mangle/filter：
 NIK_MGL_PRE_CTRL_V4
 NIK_MGL_PRE_TPROXY_V4
+NIK_MGL_PRE_TUN_V4
 NIK_MGL_OUT_MARK_V4
+NIK_MGL_OUT_TUN_V4
+NIK_FLT_IN_TUN_V4
+NIK_FLT_FWD_TUN_V4
 
-IPv6 mangle：
+IPv6 mangle/filter：
 NIK_MGL_PRE_CTRL_V6
 NIK_MGL_PRE_TPROXY_V6
+NIK_MGL_PRE_TUN_V6
 NIK_MGL_OUT_MARK_V6
-```
-
-## 无 ucode 架构
-
-### Mihomo 配置
-
-```text
-/etc/config/nikki
-  → /etc/nikki/scripts/mixin.sh
-  → jshn 生成 JSON
-  → yq 结构化合并
-  → /etc/nikki/run/config.yaml
-```
-
-### 防火墙
-
-```text
-/etc/nikki/scripts/firewall_fw3.sh
-  → ipset restore（family inet / inet6）
-  → iptables-restore --noflush
-  → ip6tables-restore --noflush（仅 mangle）
-  → ip -4 / ip -6 rule + route
-```
-
-### LuCI
-
-普通配置继续使用 LuCI 的 UCI、文件和 rc 接口；原 `luci.nikki` rpcd-ucode 对象的特殊操作由固定程序处理：
-
-```text
-/usr/libexec/nikki-rpc
+NIK_MGL_OUT_TUN_V6
+NIK_FLT_IN_TUN_V6
+NIK_FLT_FWD_TUN_V6
 ```
 
 ## 依赖
-
-核心包依赖大致包括：
 
 ```text
 firewall
@@ -164,13 +163,15 @@ yq
 mihomo-meta 或 mihomo-alpha
 ```
 
-本版不依赖：
+不依赖：
 
 ```text
 ip6tables-mod-nat
+ucode
+rpcd-mod-ucode
+firewall4
+nftables
 ```
-
-`mihomo-meta` 和 `mihomo-alpha` 使用现代 Go 工具链。纯官方 21.02 构建树通常需要回移较新的 `golang` feed，或改用与你架构匹配的预编译 Mihomo 包。
 
 ## 接入 OpenWrt 源码树
 
@@ -187,7 +188,7 @@ make menuconfig
 ```text
 Network → nikki
 LuCI → Applications → luci-app-nikki
-Network → mihomo-meta
+Network → mihomo-meta 或 mihomo-alpha
 ```
 
 ## 调试
@@ -202,26 +203,31 @@ ip6tables-save | grep NIK_
 
 ip -4 rule show
 ip -4 route show table 80
+ip -4 route show table 81
 ip -6 rule show
 ip -6 route show table 80
+ip -6 route show table 81
 
-ipset list nik_reserved_v4
-ipset list nik_reserved_v6
+ip link show dev nikki
 /etc/nikki/scripts/debug.sh > /tmp/nikki-debug.txt
 ```
 
-检查 IPv6 规则时，应确认没有输出：
+检查 IPv6 规则时，不应出现：
 
 ```text
-NIK_NAT_
+*nat
+NIK_NAT_*_V6
 -j REDIRECT
 ```
 
-## 状态说明
+## 验证状态
 
 - 已通过仓库自带的 `./tests/run-tests.sh`；
-- 测试覆盖 Shell/JavaScript/JSON 静态检查、模拟 UCI/ubus 配置生成、IPv4/IPv6 规则渲染和 restore 调用；
-- IPv6 测试明确检查规则文件不含 nat、REDIRECT 和 `NIK_NAT_*_V6`；
-- 尚未在真实 OpenWrt 21.02 SDK 中完成完整编译，也未在实体双栈路由器上执行流量回归测试。
+- 覆盖 Shell、JavaScript、JSON 静态检查；
+- 覆盖模拟 UCI/ubus 配置生成；
+- 覆盖 IPv4 TCP REDIRECT/TPROXY、IPv4/IPv6 TUN、IPv6 DNS-only TPROXY；
+- 覆盖 TUN mangle/filter 链和 restore 调用；
+- IPv6 测试会拒绝任何 nat/REDIRECT 规则；
+- 尚未在真实 OpenWrt 21.02 SDK 中完成完整编译，也未在实体路由器上执行真实流量回归测试。
 
-建议先在具备串口救援或可方便恢复固件的设备上测试。
+建议先在具备串口救援或容易恢复固件的设备上测试。

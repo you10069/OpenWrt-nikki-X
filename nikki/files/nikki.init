@@ -26,6 +26,62 @@ add_tproxy_policy_route() {
 	}
 }
 
+remove_tun_policy_route() {
+	local family="$1" mark="$2" mask="$3" pref="$4" table="$5" device="$6"
+	while ip "-$family" rule del pref "$pref" fwmark "$mark/$mask" table "$table" >/dev/null 2>&1; do :; done
+	while ip "-$family" route del default dev "$device" table "$table" >/dev/null 2>&1; do :; done
+}
+
+add_tun_policy_route() {
+	local family="$1" mark="$2" mask="$3" pref="$4" table="$5" device="$6"
+	remove_tun_policy_route "$family" "$mark" "$mask" "$pref" "$table" "$device"
+	ip "-$family" route add default dev "$device" table "$table" || return 1
+	ip "-$family" rule add pref "$pref" fwmark "$mark/$mask" table "$table" || {
+		while ip "-$family" route del default dev "$device" table "$table" >/dev/null 2>&1; do :; done
+		return 1
+	}
+}
+
+load_legacy_proxy_modes() {
+	config_get ipv4_tcp_mode proxy ipv4_tcp_mode
+	config_get ipv4_udp_mode proxy ipv4_udp_mode
+	config_get ipv6_tcp_mode proxy ipv6_tcp_mode
+	config_get ipv6_udp_mode proxy ipv6_udp_mode
+	config_get ipv4_dns_mode proxy ipv4_dns_mode
+	config_get ipv6_dns_mode proxy ipv6_dns_mode
+
+	if [ -z "$ipv4_tcp_mode$ipv4_udp_mode$ipv6_tcp_mode$ipv6_udp_mode$ipv4_dns_mode$ipv6_dns_mode" ]; then
+		local old_tcp old_udp old_v4 old_v6 old_dns4 old_dns6
+		config_get old_tcp proxy tcp_mode redirect
+		config_get old_udp proxy udp_mode tproxy
+		config_get_bool old_v4 proxy ipv4_proxy 1
+		config_get_bool old_v6 proxy ipv6_proxy 0
+		config_get_bool old_dns4 proxy ipv4_dns_hijack 1
+		config_get_bool old_dns6 proxy ipv6_dns_hijack 0
+		[ "$old_v4" -eq 1 ] && ipv4_tcp_mode="$old_tcp" || ipv4_tcp_mode=disable
+		[ "$old_v4" -eq 1 ] && ipv4_udp_mode="$old_udp" || ipv4_udp_mode=disable
+		[ "$old_v6" -eq 1 ] && ipv6_tcp_mode=tproxy || ipv6_tcp_mode=disable
+		[ "$old_v6" -eq 1 ] && ipv6_udp_mode=tproxy || ipv6_udp_mode=disable
+		[ "$old_dns4" -eq 1 ] && ipv4_dns_mode=redirect || ipv4_dns_mode=disable
+		[ "$old_dns6" -eq 1 ] && ipv6_dns_mode=tproxy || ipv6_dns_mode=disable
+	fi
+	: "${ipv4_tcp_mode:=disable}"
+	: "${ipv4_udp_mode:=disable}"
+	: "${ipv6_tcp_mode:=disable}"
+	: "${ipv6_udp_mode:=disable}"
+	: "${ipv4_dns_mode:=disable}"
+	: "${ipv6_dns_mode:=disable}"
+}
+
+legacy_modes_valid() {
+	case "$ipv4_tcp_mode" in disable|redirect|tproxy|tun) ;; *) return 1 ;; esac
+	case "$ipv4_udp_mode" in disable|tproxy|tun) ;; *) return 1 ;; esac
+	case "$ipv6_tcp_mode" in disable|tproxy|tun) ;; *) return 1 ;; esac
+	case "$ipv6_udp_mode" in disable|tproxy|tun) ;; *) return 1 ;; esac
+	case "$ipv4_dns_mode" in disable|redirect) ;; *) return 1 ;; esac
+	case "$ipv6_dns_mode" in disable|tproxy) ;; *) return 1 ;; esac
+}
+
 extra_command 'update_subscription' 'Update subscription by section id'
 extra_command 'clear_logs' 'Clear logs if size exceeds the limit'
 
@@ -126,29 +182,21 @@ start_service() {
 	config_get tproxy_listener_name "core" "tproxy_listener_name"
 	config_get tun_listener_name "core" "tun_listener_name"
 	## proxy config
-	local proxy_enabled ipv4_dns_hijack ipv6_dns_hijack ipv4_proxy ipv6_proxy tcp_mode udp_mode
+	local proxy_enabled ipv4_tcp_mode ipv4_udp_mode ipv6_tcp_mode ipv6_udp_mode ipv4_dns_mode ipv6_dns_mode tun_timeout tun_interval
 	config_get_bool proxy_enabled "proxy" "enabled" 0
-	config_get_bool ipv4_dns_hijack "proxy" "ipv4_dns_hijack" 0
-	config_get_bool ipv6_dns_hijack "proxy" "ipv6_dns_hijack" 0
-	config_get_bool ipv4_proxy "proxy" "ipv4_proxy" 1
-	config_get_bool ipv6_proxy "proxy" "ipv6_proxy" 0
-	config_get tcp_mode "proxy" "tcp_mode"
-	config_get udp_mode "proxy" "udp_mode"
+	load_legacy_proxy_modes
+	config_get tun_timeout proxy tun_timeout 30
+	config_get tun_interval proxy tun_interval 1
 	## log config
 	local log_scheduled_clear log_scheduled_clear_cron
 	config_get_bool log_scheduled_clear "log" "scheduled_clear" 0
 	config_get log_scheduled_clear_cron "log" "scheduled_clear_cron"
 
 	# Legacy backend scope validation. Core-only mode remains unrestricted.
-	if [ "$core_only" -eq 0 ] && [ "$proxy_enabled" -eq 1 ]; then
-		case "$tcp_mode" in
-			""|redirect) ;;
-			*) log "Proxy" "Legacy backend supports IPv4 TCP REDIRECT and IPv6 TCP TPROXY only (got: $tcp_mode)."; log "App" "Exit."; return ;;
-		esac
-		case "$udp_mode" in
-			""|tproxy) ;;
-			*) log "Proxy" "Legacy backend supports UDP TPROXY only (got: $udp_mode)."; log "App" "Exit."; return ;;
-		esac
+	if [ "$core_only" -eq 0 ] && [ "$proxy_enabled" -eq 1 ] && ! legacy_modes_valid; then
+		log "Proxy" "Invalid legacy mode selection."
+		log "App" "Exit."
+		return
 	fi
 	# get profile
 	local profile_type; profile_type=$(echo "$profile" | cut -d ':' -f 1)
@@ -226,8 +274,14 @@ start_service() {
 			yq -M -i eval-all '... comments="" | . as $item ireduce ({}; . * $item ) | .proxies = .nikki-proxies + .proxies | del(.nikki-proxies) | .proxy-groups = .nikki-proxy-groups + .proxy-groups | del(.nikki-proxy-groups) | .rules = .nikki-rules + .rules | del(.nikki-rules) | explode(.)' "$RUN_PROFILE_PATH" "$MIXIN_FILE_PATH" "$generated_mixin"
 		fi
 		if [ "$proxy_enabled" = 1 ]; then
+			local tun_mode_active; tun_mode_active=0
+			case "$ipv4_tcp_mode:$ipv4_udp_mode:$ipv6_tcp_mode:$ipv6_udp_mode" in *tun*) tun_mode_active=1 ;; esac
 			if yq -M -e 'has("tun")' "$RUN_PROFILE_PATH" > /dev/null 2>&1; then
-				yq -M -i '(.tun) |= (.auto-route = false | .auto-redirect = false | .auto-detect-interface = false | .disable-icmp-forwarding = true)' "$RUN_PROFILE_PATH"
+				if [ "$tun_mode_active" -eq 1 ]; then
+					yq -M -i '(.tun) |= (.enable = true | .auto-route = false | .auto-redirect = false | .auto-detect-interface = false | .disable-icmp-forwarding = true)' "$RUN_PROFILE_PATH"
+				else
+					yq -M -i '(.tun) |= (.auto-route = false | .auto-redirect = false | .auto-detect-interface = false | .disable-icmp-forwarding = true)' "$RUN_PROFILE_PATH"
+				fi
 			fi
 			if yq -M -e 'has("listeners")' "$RUN_PROFILE_PATH" > /dev/null 2>&1; then
 				yq -M -i '(.listeners[] | select(.type == "tun")) |= (.auto-route = false | .auto-redirect = false | .auto-detect-interface = false | .disable-icmp-forwarding = true)' "$RUN_PROFILE_PATH"
@@ -237,33 +291,41 @@ start_service() {
 	# check profile
 	if [ "$core_only" = 0 ] && [ "$proxy_enabled" = 1 ]; then
 		log "Profile" "Checking..."
-		# IPv4 DNS is redirected to the dedicated DNS listener. IPv6 DNS is
-		# intercepted through the transparent TPROXY listener instead.
-		if [ "$ipv4_dns_hijack" = 1 ]; then
+		if [ "$ipv4_dns_mode" = redirect ]; then
 			if yq -M -e '(has("dns") and (.dns | .enable) and (.dns | has("listen"))) | not' "$RUN_PROFILE_PATH" > /dev/null 2>&1; then
 				log "Profile" "Check failed."
-				log "Profile" "IPv4 DNS hijack requires an enabled DNS listener."
+				log "Profile" "IPv4 DNS REDIRECT requires an enabled Mihomo DNS listener."
 				log "App" "Exit."
 				return
 			fi
 		fi
-		if [ "$ipv4_proxy" = 1 ] && [ "$tcp_mode" = "redirect" ]; then
-			if yq -M -e "(has(\"redir-port\") or (has(\"listeners\") and .listeners | any_c(.name == \"$redirect_listener_name\" and .type == \"redir\"))) | not" "$RUN_PROFILE_PATH" > /dev/null 2>&1; then
+		if [ "$ipv4_tcp_mode" = redirect ]; then
+			if REDIRECT_LISTENER="$redirect_listener_name" yq -M -e '(has("redir-port") or (has("listeners") and .listeners | any_c(.name == env(REDIRECT_LISTENER) and .type == "redir"))) | not' "$RUN_PROFILE_PATH" > /dev/null 2>&1; then
 				log "Profile" "Check failed."
 				log "Profile" "IPv4 TCP REDIRECT requires a Redirect Port/Listener."
 				log "App" "Exit."
 				return
 			fi
 		fi
-		if { [ "$ipv4_proxy" = 1 ] && [ "$udp_mode" = "tproxy" ]; } || \
-		   [ "$ipv6_proxy" = 1 ] || [ "$ipv6_dns_hijack" = 1 ]; then
-			if yq -M -e "(has(\"tproxy-port\") or (has(\"listeners\") and .listeners | any_c(.name == \"$tproxy_listener_name\" and .type == \"tproxy\"))) | not" "$RUN_PROFILE_PATH" > /dev/null 2>&1; then
+		if [ "$ipv4_tcp_mode" = tproxy ] || [ "$ipv4_udp_mode" = tproxy ] || \
+		   [ "$ipv6_tcp_mode" = tproxy ] || [ "$ipv6_udp_mode" = tproxy ] || [ "$ipv6_dns_mode" = tproxy ]; then
+			if TPROXY_LISTENER="$tproxy_listener_name" yq -M -e '(has("tproxy-port") or (has("listeners") and .listeners | any_c(.name == env(TPROXY_LISTENER) and .type == "tproxy"))) | not' "$RUN_PROFILE_PATH" > /dev/null 2>&1; then
 				log "Profile" "Check failed."
-				log "Profile" "IPv4 UDP and all IPv6 interception require a TPROXY Port/Listener."
+				log "Profile" "Selected TPROXY modes require a TPROXY Port/Listener."
 				log "App" "Exit."
 				return
 			fi
 		fi
+		case "$ipv4_tcp_mode:$ipv4_udp_mode:$ipv6_tcp_mode:$ipv6_udp_mode" in
+			*tun*)
+				if TUN_LISTENER="$tun_listener_name" yq -M -e '((.tun | select(.enable == true) | .device) // (.listeners[]? | select(.name == env(TUN_LISTENER) and .type == "tun") | .device) // "") == ""' "$RUN_PROFILE_PATH" > /dev/null 2>&1; then
+					log "Profile" "Check failed."
+					log "Profile" "Selected TUN modes require an enabled TUN device/listener."
+					log "App" "Exit."
+					return
+				fi
+				;;
+		esac
 		log "Profile" "Check passed."
 	fi
 	# test profile
@@ -329,87 +391,100 @@ service_started() {
 	[ -f "$STARTED_FLAG_PATH" ] || return 0
 	config_load nikki
 
-	local proxy_enabled core_only ipv4_proxy ipv6_proxy ipv4_dns_hijack ipv6_dns_hijack tcp_mode udp_mode
+	local proxy_enabled core_only ipv4_tcp_mode ipv4_udp_mode ipv6_tcp_mode ipv6_udp_mode ipv4_dns_mode ipv6_dns_mode
 	config_get_bool proxy_enabled proxy enabled 0
 	config_get_bool core_only config core_only 0
-	config_get_bool ipv4_proxy proxy ipv4_proxy 1
-	config_get_bool ipv6_proxy proxy ipv6_proxy 0
-	config_get_bool ipv4_dns_hijack proxy ipv4_dns_hijack 1
-	config_get_bool ipv6_dns_hijack proxy ipv6_dns_hijack 0
-	config_get tcp_mode proxy tcp_mode redirect
-	config_get udp_mode proxy udp_mode tproxy
-
+	load_legacy_proxy_modes
 	[ "$proxy_enabled" -eq 1 ] || { log "Proxy" "Disabled."; return 0; }
 	[ "$core_only" -eq 0 ] || { log "Proxy" "Core-only mode; firewall is not modified."; return 0; }
-	if [ "$ipv4_proxy" -ne 1 ] && [ "$ipv4_dns_hijack" -ne 1 ] && [ "$ipv6_proxy" -ne 1 ] && [ "$ipv6_dns_hijack" -ne 1 ]; then
-		log "Proxy" "IPv4/IPv6 proxy and DNS hijack are all disabled."
+	legacy_modes_valid || { log "Proxy" "Invalid legacy mode selection."; return 1; }
+	if [ "$ipv4_tcp_mode" = disable ] && [ "$ipv4_udp_mode" = disable ] && [ "$ipv6_tcp_mode" = disable ] && [ "$ipv6_udp_mode" = disable ] && [ "$ipv4_dns_mode" = disable ] && [ "$ipv6_dns_mode" = disable ]; then
+		log "Proxy" "All proxy and DNS modes are disabled."
 		return 0
 	fi
 
-	local tproxy_fw_mark tproxy_fw_mask tproxy_rule_pref tproxy_route_table
+	local tproxy_fw_mark tproxy_fw_mask tun_fw_mark tun_fw_mask tproxy_rule_pref tun_rule_pref tproxy_route_table tun_route_table
 	config_get tproxy_fw_mark routing tproxy_fw_mark 0x80
 	config_get tproxy_fw_mask routing tproxy_fw_mask 0xFF
+	config_get tun_fw_mark routing tun_fw_mark 0x81
+	config_get tun_fw_mask routing tun_fw_mask 0xFF
 	config_get tproxy_rule_pref routing tproxy_rule_pref 1024
+	config_get tun_rule_pref routing tun_rule_pref 1025
 	config_get tproxy_route_table routing tproxy_route_table 80
+	config_get tun_route_table routing tun_route_table 81
 
-	# IPv4 and IPv6 have separate policy routing databases, so the same mark,
-	# preference and table number can be used safely for both families. IPv4
-	# only needs this path for UDP; every IPv6 interception path uses it.
-	local ipv4_tproxy_active ipv6_tproxy_active
-	ipv4_tproxy_active=0
-	ipv6_tproxy_active=0
-	[ "$ipv4_proxy" -eq 1 ] && [ "$udp_mode" = tproxy ] && ipv4_tproxy_active=1
-	if [ "$ipv6_dns_hijack" -eq 1 ] || \
-	   { [ "$ipv6_proxy" -eq 1 ] && { [ "$tcp_mode" = redirect ] || [ "$udp_mode" = tproxy ]; }; }; then
-		ipv6_tproxy_active=1
+	local ipv4_tproxy_active ipv6_tproxy_active ipv4_tun_active ipv6_tun_active
+	ipv4_tproxy_active=0; ipv6_tproxy_active=0; ipv4_tun_active=0; ipv6_tun_active=0
+	if [ "$ipv4_tcp_mode" = tproxy ] || [ "$ipv4_udp_mode" = tproxy ]; then ipv4_tproxy_active=1; fi
+	if [ "$ipv6_tcp_mode" = tproxy ] || [ "$ipv6_udp_mode" = tproxy ] || [ "$ipv6_dns_mode" = tproxy ]; then ipv6_tproxy_active=1; fi
+	if [ "$ipv4_tcp_mode" = tun ] || [ "$ipv4_udp_mode" = tun ]; then ipv4_tun_active=1; fi
+	if [ "$ipv6_tcp_mode" = tun ] || [ "$ipv6_udp_mode" = tun ]; then ipv6_tun_active=1; fi
+
+	local tun_device tun_listener_name tun_timeout tun_interval
+	tun_device=''
+	if [ "$ipv4_tun_active" -eq 1 ] || [ "$ipv6_tun_active" -eq 1 ]; then
+		config_get tun_listener_name core tun_listener_name tun-in
+		config_get tun_timeout proxy tun_timeout 30
+		config_get tun_interval proxy tun_interval 1
+		tun_device="$(TUN_LISTENER="$tun_listener_name" yq -M -r '(.tun | select(.enable == true) | .device) // (.listeners[]? | select(.name == env(TUN_LISTENER) and .type == "tun") | .device) // ""' "$RUN_PROFILE_PATH" 2>/dev/null)"
+		[ -n "$tun_device" ] || { log "Routing" "TUN device is not configured."; return 1; }
+		log "Routing" "Waiting for TUN device $tun_device..."
+		while [ "$tun_timeout" -gt 0 ]; do
+			if ip link show dev "$tun_device" 2>/dev/null | grep -q 'UP'; then break; fi
+			tun_timeout=$((tun_timeout - tun_interval))
+			sleep "$tun_interval"
+		done
+		[ "$tun_timeout" -gt 0 ] || { log "Routing" "TUN device did not become ready."; return 1; }
 	fi
 
 	if [ "$ipv4_tproxy_active" -eq 1 ] && ! add_tproxy_policy_route 4 "$tproxy_fw_mark" "$tproxy_fw_mask" "$tproxy_rule_pref" "$tproxy_route_table"; then
-		log "Routing" "Failed to create IPv4 TPROXY policy route."
-		return 1
+		log "Routing" "Failed to create IPv4 TPROXY policy route."; return 1
 	fi
 	if [ "$ipv6_tproxy_active" -eq 1 ] && ! add_tproxy_policy_route 6 "$tproxy_fw_mark" "$tproxy_fw_mask" "$tproxy_rule_pref" "$tproxy_route_table"; then
 		log "Routing" "Failed to create IPv6 TPROXY policy route."
 		[ "$ipv4_tproxy_active" -eq 1 ] && remove_tproxy_policy_route 4 "$tproxy_fw_mark" "$tproxy_fw_mask" "$tproxy_rule_pref" "$tproxy_route_table"
 		return 1
 	fi
+	if [ "$ipv4_tun_active" -eq 1 ] && ! add_tun_policy_route 4 "$tun_fw_mark" "$tun_fw_mask" "$tun_rule_pref" "$tun_route_table" "$tun_device"; then
+		log "Routing" "Failed to create IPv4 TUN policy route."
+		remove_tproxy_policy_route 4 "$tproxy_fw_mark" "$tproxy_fw_mask" "$tproxy_rule_pref" "$tproxy_route_table"
+		remove_tproxy_policy_route 6 "$tproxy_fw_mark" "$tproxy_fw_mask" "$tproxy_rule_pref" "$tproxy_route_table"
+		return 1
+	fi
+	if [ "$ipv6_tun_active" -eq 1 ] && ! add_tun_policy_route 6 "$tun_fw_mark" "$tun_fw_mask" "$tun_rule_pref" "$tun_route_table" "$tun_device"; then
+		log "Routing" "Failed to create IPv6 TUN policy route."
+		remove_tproxy_policy_route 4 "$tproxy_fw_mark" "$tproxy_fw_mask" "$tproxy_rule_pref" "$tproxy_route_table"
+		remove_tproxy_policy_route 6 "$tproxy_fw_mark" "$tproxy_fw_mask" "$tproxy_rule_pref" "$tproxy_route_table"
+		[ "$ipv4_tun_active" -eq 1 ] && remove_tun_policy_route 4 "$tun_fw_mark" "$tun_fw_mask" "$tun_rule_pref" "$tun_route_table" "$tun_device"
+		return 1
+	fi
 
-	# Some vendor kernels load br_netfilter and process routed bridge frames
-	# twice. Preserve each sysctl independently and restore it on stop.
+	# Some vendor kernels process bridged frames twice when br_netfilter is on.
 	if { [ "$ipv4_tproxy_active" -eq 1 ] || [ "$ipv6_tproxy_active" -eq 1 ]; } && lsmod | grep -q '^br_netfilter'; then
 		local bridge_nf_call_iptables bridge_nf_call_ip6tables
 		if [ "$ipv4_tproxy_active" -eq 1 ]; then
 			bridge_nf_call_iptables="$(sysctl -e -n net.bridge.bridge-nf-call-iptables 2>/dev/null)"
-			if [ "$bridge_nf_call_iptables" = 1 ]; then
-				touch "$BRIDGE_NF_CALL_IPTABLES_FLAG_PATH"
-				sysctl -q -w net.bridge.bridge-nf-call-iptables=0
-			fi
+			if [ "$bridge_nf_call_iptables" = 1 ]; then touch "$BRIDGE_NF_CALL_IPTABLES_FLAG_PATH"; sysctl -q -w net.bridge.bridge-nf-call-iptables=0; fi
 		fi
 		if [ "$ipv6_tproxy_active" -eq 1 ]; then
 			bridge_nf_call_ip6tables="$(sysctl -e -n net.bridge.bridge-nf-call-ip6tables 2>/dev/null)"
-			if [ "$bridge_nf_call_ip6tables" = 1 ]; then
-				touch "$BRIDGE_NF_CALL_IP6TABLES_FLAG_PATH"
-				sysctl -q -w net.bridge.bridge-nf-call-ip6tables=0
-			fi
+			if [ "$bridge_nf_call_ip6tables" = 1 ]; then touch "$BRIDGE_NF_CALL_IP6TABLES_FLAG_PATH"; sysctl -q -w net.bridge.bridge-nf-call-ip6tables=0; fi
 		fi
 	fi
 
 	if "$FIREWALL_FW3_SH" apply; then
-		log "Proxy" "Firewall3 hijack is active (IPv4 TCP=REDIRECT/UDP=TPROXY, IPv6 TCP+UDP+DNS=TPROXY)."
+		log "Proxy" "Firewall3 hijack is active (REDIRECT / TPROXY / TUN by address family and protocol)."
 	else
 		log "Proxy" "Failed to apply firewall3/xtables rules."
 		remove_tproxy_policy_route 4 "$tproxy_fw_mark" "$tproxy_fw_mask" "$tproxy_rule_pref" "$tproxy_route_table"
 		remove_tproxy_policy_route 6 "$tproxy_fw_mark" "$tproxy_fw_mask" "$tproxy_rule_pref" "$tproxy_route_table"
-		if rm -f "$BRIDGE_NF_CALL_IPTABLES_FLAG_PATH" 2>/dev/null; then
-			sysctl -q -w net.bridge.bridge-nf-call-iptables=1 >/dev/null 2>&1
-		fi
-		if rm -f "$BRIDGE_NF_CALL_IP6TABLES_FLAG_PATH" 2>/dev/null; then
-			sysctl -q -w net.bridge.bridge-nf-call-ip6tables=1 >/dev/null 2>&1
-		fi
+		[ -n "$tun_device" ] && remove_tun_policy_route 4 "$tun_fw_mark" "$tun_fw_mask" "$tun_rule_pref" "$tun_route_table" "$tun_device"
+		[ -n "$tun_device" ] && remove_tun_policy_route 6 "$tun_fw_mark" "$tun_fw_mask" "$tun_rule_pref" "$tun_route_table" "$tun_device"
+		if rm -f "$BRIDGE_NF_CALL_IPTABLES_FLAG_PATH" 2>/dev/null; then sysctl -q -w net.bridge.bridge-nf-call-iptables=1 >/dev/null 2>&1; fi
+		if rm -f "$BRIDGE_NF_CALL_IP6TABLES_FLAG_PATH" 2>/dev/null; then sysctl -q -w net.bridge.bridge-nf-call-ip6tables=1 >/dev/null 2>&1; fi
 		return 1
 	fi
 }
-
 service_stopped() {
 	cleanup
 }
@@ -425,16 +500,31 @@ service_triggers() {
 
 cleanup() {
 	config_load nikki
-	local log_clear_at_stop tproxy_fw_mark tproxy_fw_mask tproxy_rule_pref tproxy_route_table
+	local log_clear_at_stop tproxy_fw_mark tproxy_fw_mask tproxy_rule_pref tproxy_route_table tun_fw_mark tun_fw_mask tun_rule_pref tun_route_table tun_listener_name tun_device
 	config_get_bool log_clear_at_stop log clear_at_stop 0
 	config_get tproxy_fw_mark routing tproxy_fw_mark 0x80
 	config_get tproxy_fw_mask routing tproxy_fw_mask 0xFF
 	config_get tproxy_rule_pref routing tproxy_rule_pref 1024
 	config_get tproxy_route_table routing tproxy_route_table 80
+	config_get tun_fw_mark routing tun_fw_mark 0x81
+	config_get tun_fw_mask routing tun_fw_mask 0xFF
+	config_get tun_rule_pref routing tun_rule_pref 1025
+	config_get tun_route_table routing tun_route_table 81
+	config_get tun_listener_name core tun_listener_name tun-in
+	tun_device="$(TUN_LISTENER="$tun_listener_name" yq -M -r '(.tun | .device) // (.listeners[]? | select(.name == env(TUN_LISTENER) and .type == "tun") | .device) // ""' "$RUN_PROFILE_PATH" 2>/dev/null)"
 
 	[ -x "$FIREWALL_FW3_SH" ] && "$FIREWALL_FW3_SH" remove >/dev/null 2>&1
 	remove_tproxy_policy_route 4 "$tproxy_fw_mark" "$tproxy_fw_mask" "$tproxy_rule_pref" "$tproxy_route_table"
 	remove_tproxy_policy_route 6 "$tproxy_fw_mark" "$tproxy_fw_mask" "$tproxy_rule_pref" "$tproxy_route_table"
+	if [ -n "$tun_device" ]; then
+		remove_tun_policy_route 4 "$tun_fw_mark" "$tun_fw_mask" "$tun_rule_pref" "$tun_route_table" "$tun_device"
+		remove_tun_policy_route 6 "$tun_fw_mark" "$tun_fw_mask" "$tun_rule_pref" "$tun_route_table" "$tun_device"
+	else
+		while ip -4 rule del pref "$tun_rule_pref" fwmark "$tun_fw_mark/$tun_fw_mask" table "$tun_route_table" >/dev/null 2>&1; do :; done
+		while ip -6 rule del pref "$tun_rule_pref" fwmark "$tun_fw_mark/$tun_fw_mask" table "$tun_route_table" >/dev/null 2>&1; do :; done
+		ip -4 route flush table "$tun_route_table" >/dev/null 2>&1
+		ip -6 route flush table "$tun_route_table" >/dev/null 2>&1
+	fi
 
 	rm -f "$STARTED_FLAG_PATH"
 	if rm -f "$BRIDGE_NF_CALL_IPTABLES_FLAG_PATH" 2>/dev/null; then

@@ -1129,5 +1129,38 @@ msgstr "Настройки procd"
 msgid "Legacy Backend"
 msgstr "Устаревший бэкенд"
 
-msgid "IPv4: TCP Redirect + UDP TPROXY (firewall3/iptables)"
-msgstr "IPv4: TCP Redirect + UDP TPROXY (firewall3/iptables)"
+msgid "IPv4 TCP Mode"
+msgstr ""
+
+msgid "IPv4 UDP Mode"
+msgstr ""
+
+msgid "IPv6 TCP Mode"
+msgstr ""
+
+msgid "IPv6 UDP Mode"
+msgstr ""
+
+msgid "IPv4 DNS Mode"
+msgstr ""
+
+msgid "IPv6 DNS Mode"
+msgstr ""
+
+msgid "REDIRECT to Mihomo DNS"
+msgstr ""
+
+msgid "TUN Device Timeout"
+msgstr ""
+
+msgid "TUN Device Check Interval"
+msgstr ""
+
+msgid "REDIRECT TCP/UDP port 53 to the Mihomo DNS listener."
+msgstr ""
+
+msgid "TPROXY TCP/UDP port 53 to the Mihomo TPROXY listener as ordinary transparent traffic; it does not enter the built-in DNS listener."
+msgstr ""
+
+msgid "IPv4 TCP: REDIRECT / TPROXY / TUN; IPv4 UDP: TPROXY / TUN; IPv6 TCP/UDP: TPROXY / TUN; IPv4 DNS: REDIRECT to Mihomo DNS; IPv6 DNS: TPROXY as transparent traffic."
+msgstr ""

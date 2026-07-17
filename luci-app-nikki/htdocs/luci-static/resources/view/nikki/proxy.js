@@ -33,29 +33,58 @@ return view.extend({
         o.rmempty = false;
 
         o = s.taboption('proxy', form.DummyValue, '_legacy_scope', _('Legacy Backend'));
-        o.default = _('IPv4: TCP REDIRECT + UDP TPROXY; IPv6: TCP/UDP/DNS TPROXY only');
+        o.default = _('IPv4 TCP: REDIRECT / TPROXY / TUN; IPv4 UDP: TPROXY / TUN; IPv6 TCP/UDP: TPROXY / TUN; IPv4 DNS: REDIRECT to Mihomo DNS; IPv6 DNS: TPROXY as transparent traffic.');
 
-        o = s.taboption('proxy', form.ListValue, 'tcp_mode', _('TCP Mode'), _('This controls IPv4 TCP. IPv6 TCP always uses TPROXY when IPv6 proxy is enabled.'));
-        o.optional = true;
-        o.placeholder = _('Disable');
-        o.value('redirect', _('Redirect Mode'));
-
-        o = s.taboption('proxy', form.ListValue, 'udp_mode', _('UDP Mode'));
-        o.optional = true;
-        o.placeholder = _('Disable');
-        o.value('tproxy', _('TPROXY Mode'));
-
-        o = s.taboption('proxy', form.Flag, 'ipv4_dns_hijack', _('IPv4 DNS Hijack'));
+        o = s.taboption('proxy', form.ListValue, 'ipv4_tcp_mode', _('IPv4 TCP Mode'));
         o.rmempty = false;
+        o.value('disable', _('Disable'));
+        o.value('redirect', _('REDIRECT'));
+        o.value('tproxy', _('TPROXY'));
+        o.value('tun', _('TUN'));
 
-        o = s.taboption('proxy', form.Flag, 'ipv6_dns_hijack', _('IPv6 DNS Hijack'), _('Intercept IPv6 TCP/UDP port 53 through the TPROXY listener; no IPv6 NAT/REDIRECT is used.'));
+        o = s.taboption('proxy', form.ListValue, 'ipv4_udp_mode', _('IPv4 UDP Mode'));
         o.rmempty = false;
+        o.value('disable', _('Disable'));
+        o.value('tproxy', _('TPROXY'));
+        o.value('tun', _('TUN'));
 
-        o = s.taboption('proxy', form.Flag, 'ipv4_proxy', _('IPv4 Proxy'));
+        o = s.taboption('proxy', form.ListValue, 'ipv6_tcp_mode', _('IPv6 TCP Mode'));
         o.rmempty = false;
+        o.value('disable', _('Disable'));
+        o.value('tproxy', _('TPROXY'));
+        o.value('tun', _('TUN'));
 
-        o = s.taboption('proxy', form.Flag, 'ipv6_proxy', _('IPv6 Proxy'), _('IPv6 TCP and UDP are both intercepted through TPROXY.'));
+        o = s.taboption('proxy', form.ListValue, 'ipv6_udp_mode', _('IPv6 UDP Mode'));
         o.rmempty = false;
+        o.value('disable', _('Disable'));
+        o.value('tproxy', _('TPROXY'));
+        o.value('tun', _('TUN'));
+
+        o = s.taboption('proxy', form.ListValue, 'ipv4_dns_mode', _('IPv4 DNS Mode'), _('REDIRECT TCP/UDP port 53 to the Mihomo DNS listener.'));
+        o.rmempty = false;
+        o.value('disable', _('Disable'));
+        o.value('redirect', _('REDIRECT to Mihomo DNS'));
+
+        o = s.taboption('proxy', form.ListValue, 'ipv6_dns_mode', _('IPv6 DNS Mode'), _('TPROXY TCP/UDP port 53 to the Mihomo TPROXY listener as ordinary transparent traffic; it does not enter the built-in DNS listener.'));
+        o.rmempty = false;
+        o.value('disable', _('Disable'));
+        o.value('tproxy', _('TPROXY'));
+
+        o = s.taboption('proxy', form.Value, 'tun_timeout', _('TUN Device Timeout'));
+        o.datatype = 'uinteger';
+        o.default = '30';
+        o.depends('ipv4_tcp_mode', 'tun');
+        o.depends('ipv4_udp_mode', 'tun');
+        o.depends('ipv6_tcp_mode', 'tun');
+        o.depends('ipv6_udp_mode', 'tun');
+
+        o = s.taboption('proxy', form.Value, 'tun_interval', _('TUN Device Check Interval'));
+        o.datatype = 'uinteger';
+        o.default = '1';
+        o.depends('ipv4_tcp_mode', 'tun');
+        o.depends('ipv4_udp_mode', 'tun');
+        o.depends('ipv6_tcp_mode', 'tun');
+        o.depends('ipv6_udp_mode', 'tun');
 
         s.tab('router', _('Router Proxy'));
 

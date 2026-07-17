@@ -1,7 +1,7 @@
 include $(TOPDIR)/rules.mk
 
 PKG_NAME:=nikki
-PKG_VERSION:=2026.04.08.legacy3
+PKG_VERSION:=2026.04.08.legacy4
 PKG_RELEASE:=1
 PKGARCH:=all
 
@@ -22,8 +22,8 @@ endef
 
 define Package/nikki/description
   A firewall3/xtables-oriented Nikki fork for OpenWrt 21.02-class systems.
-  The backend supports IPv4 TCP REDIRECT/UDP TPROXY and IPv6 TCP/UDP/DNS
-  TPROXY, with router/LAN access control and ipset bypass rules without ucode.
+  The backend supports per-family TCP/UDP REDIRECT, TPROXY and TUN routing,
+  IPv4 DNS REDIRECT to Mihomo DNS, and IPv6 DNS TPROXY without ucode.
 endef
 
 define Package/nikki/conffiles

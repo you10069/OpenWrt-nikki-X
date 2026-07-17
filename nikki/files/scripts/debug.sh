@@ -70,7 +70,10 @@ cat <<'EOF_RULES4'
 ```text
 EOF_RULES4
 ip -4 rule list
+printf '%s\n' '-- TPROXY table --'
 ip -4 route list table "$(uci -q get nikki.routing.tproxy_route_table || echo 80)" 2>/dev/null
+printf '%s\n' '-- TUN table --'
+ip -4 route list table "$(uci -q get nikki.routing.tun_route_table || echo 81)" 2>/dev/null
 cat <<'EOF_RULES6'
 ```
 
@@ -79,7 +82,10 @@ cat <<'EOF_RULES6'
 ```text
 EOF_RULES6
 ip -6 rule list
+printf '%s\n' '-- TPROXY table --'
 ip -6 route list table "$(uci -q get nikki.routing.tproxy_route_table || echo 80)" 2>/dev/null
+printf '%s\n' '-- TUN table --'
+ip -6 route list table "$(uci -q get nikki.routing.tun_route_table || echo 81)" 2>/dev/null
 cat <<'EOF_IPTABLES'
 ```
 
@@ -115,11 +121,12 @@ cat <<'EOF_MODULES'
 EOF_MODULES
 for cmd in iptables ip6tables; do
 	"$cmd" -t mangle -j TPROXY -h >/dev/null 2>&1 && echo "$cmd TPROXY: available" || echo "$cmd TPROXY: missing"
+	"$cmd" -t mangle -j MARK -h >/dev/null 2>&1 && echo "$cmd MARK/TUN: available" || echo "$cmd MARK/TUN: missing"
 	"$cmd" -m owner -h >/dev/null 2>&1 && echo "$cmd owner: available" || echo "$cmd owner: missing"
 	"$cmd" -m set -h >/dev/null 2>&1 && echo "$cmd set: available" || echo "$cmd set: missing"
 	"$cmd" -m dscp -h >/dev/null 2>&1 && echo "$cmd dscp: available" || echo "$cmd dscp: missing"
 done
-printf '%s\n' 'IPv6 NAT/REDIRECT: intentionally unused'
+printf '%s\n' 'IPv6 NAT/REDIRECT: intentionally unused; IPv6 DNS uses TPROXY'
 cat <<'EOF_SERVICE'
 ```
 
