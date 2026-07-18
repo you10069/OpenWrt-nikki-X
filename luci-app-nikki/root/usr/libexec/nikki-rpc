@@ -173,6 +173,47 @@ api() {
 	printf '%s' "$output" | yq -M -p json -o json -e '.' 2>/dev/null || printf '{}\n'
 }
 
+firewall_backend() {
+	local fw4_active=0 fw3_active=0 fw4_installed=0 fw3_installed=0 backend="unknown"
+
+	command -v fw4 >/dev/null 2>&1 && fw4_installed=1
+	command -v fw3 >/dev/null 2>&1 && fw3_installed=1
+
+	# An active OpenWrt firewall4 instance owns the canonical inet/fw4 table.
+	if command -v nft >/dev/null 2>&1 && nft list table inet fw4 >/dev/null 2>&1; then
+		fw4_active=1
+	fi
+
+	# firewall3 emits characteristic zone/rule chains and !fw3 comments into
+	# the active iptables ruleset. Require the fw3 program as well to avoid
+	# treating arbitrary compatibility rules on firewall4 systems as fw3.
+	if [ "$fw3_installed" -eq 1 ]; then
+		if command -v iptables-save >/dev/null 2>&1 && \
+			iptables-save 2>/dev/null | grep -Eq '(^:zone_[^ ]+_(input|output|forward) |/\* !fw3 \*/|^-A (input|forwarding|output)_rule )'; then
+			fw3_active=1
+		elif command -v ip6tables-save >/dev/null 2>&1 && \
+			ip6tables-save 2>/dev/null | grep -Eq '(^:zone_[^ ]+_(input|output|forward) |/\* !fw3 \*/|^-A (input|forwarding|output)_rule )'; then
+			fw3_active=1
+		fi
+	fi
+
+	if [ "$fw4_active" -eq 1 ] && [ "$fw3_active" -eq 1 ]; then
+		backend="mixed"
+	elif [ "$fw4_active" -eq 1 ]; then
+		backend="fw4"
+	elif [ "$fw3_active" -eq 1 ]; then
+		backend="fw3"
+	elif [ "$fw4_installed" -eq 1 ]; then
+		backend="fw4-stopped"
+	elif [ "$fw3_installed" -eq 1 ]; then
+		backend="fw3-stopped"
+	fi
+
+	json_init
+	json_add_string backend "$backend"
+	json_dump
+}
+
 identifiers() {
 	json_init
 	json_add_array users
@@ -245,6 +286,7 @@ case "$1" in
 	core-action) core_action "$2" ;;
 	api) api "$2" "$3" "$4" "$5" ;;
 	identifiers) identifiers ;;
+	firewall-backend) firewall_backend ;;
 	debug) debug ;;
 	write-file) write_file "$2" "$3" "$4" "$5" "$6" ;;
 	*) json_failure "unknown action"; exit 2 ;;

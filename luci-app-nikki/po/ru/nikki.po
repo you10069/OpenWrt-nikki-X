@@ -1126,9 +1126,6 @@ msgstr "Имя пользователя"
 msgid "procd Config"
 msgstr "Настройки procd"
 
-msgid "Legacy Backend"
-msgstr "Устаревший бэкенд"
-
 msgid "IPv4 TCP Mode"
 msgstr ""
 
@@ -1160,9 +1157,6 @@ msgid "REDIRECT TCP/UDP port 53 to the Mihomo DNS listener."
 msgstr ""
 
 msgid "TPROXY TCP/UDP port 53 to the Mihomo TPROXY listener as ordinary transparent traffic; it does not enter the built-in DNS listener."
-msgstr ""
-
-msgid "IPv4 TCP: REDIRECT / TPROXY / TUN; IPv4 UDP: TPROXY / TUN; IPv6 TCP/UDP: TPROXY / TUN; IPv4 DNS: REDIRECT to Mihomo DNS; IPv6 DNS: TPROXY as transparent traffic."
 msgstr ""
 
 msgid "Device Architecture"
@@ -1360,3 +1354,44 @@ msgstr "Конфигурация сохранена. Снова проверьт
 
 msgid "Core update configuration saved."
 msgstr "Конфигурация обновления ядра сохранена."
+
+msgid "Current Firewall"
+msgstr "Текущий межсетевой экран"
+
+msgid "firewall3 / iptables"
+msgstr "firewall3 / iptables"
+
+msgid "firewall4 / nftables"
+msgstr "firewall4 / nftables"
+
+msgid "Mixed state: firewall3 + firewall4"
+msgstr "Смешанный режим: firewall3 + firewall4"
+
+msgid "firewall3 / iptables (not running)"
+msgstr "firewall3 / iptables (не запущен)"
+
+msgid "firewall4 / nftables (not running)"
+msgstr "firewall4 / nftables (не запущен)"
+
+msgid "Unknown or firewall not running"
+msgstr "Неизвестно или межсетевой экран не запущен"
+
+#: applications/luci-app-nikki/htdocs/luci-static/resources/view/nikki/app.js
+msgid "To ensure accurate DNS queries and traffic routing:"
+msgstr "Для точных DNS-запросов и маршрутизации трафика:"
+
+#: applications/luci-app-nikki/htdocs/luci-static/resources/view/nikki/app.js
+msgid "1. Manually disable: Network - Interfaces - DHCP/DNS - DNS Redirect"
+msgstr "1. Вручную отключите: Сеть - Интерфейсы - DHCP/DNS - Перенаправление DNS"
+
+#: applications/luci-app-nikki/htdocs/luci-static/resources/view/nikki/app.js
+msgid "2. Disable encrypted DNS / secure DNS in operating systems, browsers, and other software on computers and phones"
+msgstr "2. Отключите зашифрованный/безопасный DNS в ОС, браузерах и других программах на компьютерах и телефонах"
+
+#: applications/luci-app-nikki/htdocs/luci-static/resources/view/nikki/proxy.js
+msgid "If you do not know what you are doing, do not change any settings on this page; keep the defaults."
+msgstr "Если вы не понимаете назначение параметров, не изменяйте настройки на этой странице и оставьте значения по умолчанию."
+
+#: applications/luci-app-nikki/htdocs/luci-static/resources/view/nikki/proxy.js
+msgid "Experimental feature; not recommended."
+msgstr "Экспериментальная функция; включать не рекомендуется."

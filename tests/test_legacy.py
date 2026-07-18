@@ -1201,6 +1201,51 @@ printf '{{}}\\n'
     assert "http://[::]:9090/version" not in call
 
 
+
+def test_rpc_firewall_backend_detection(tmp: Path) -> None:
+    runtime = tmp / "rpc-firewall"
+    bin_dir = runtime / "bin"
+    bin_dir.mkdir(parents=True)
+    jshn = make_jshn_mock(runtime)
+    source = (ROOT / "luci-app-nikki/root/usr/libexec/nikki-rpc").read_text()
+    source = source.replace('. /usr/share/libubox/jshn.sh', f'. "{jshn}"', 1)
+    source = source.replace('TMP_DIR="/var/run/nikki"', f'TMP_DIR="{runtime / "tmp"}"', 1)
+    helper = runtime / "nikki-rpc"
+    write(helper, source)
+    env = os.environ.copy()
+    env["PATH"] = f"{bin_dir}:{env['PATH']}"
+    env["JSHN_OPS"] = str(runtime / "jshn-ops.tsv")
+
+    def command(name: str, body: str) -> None:
+        write(bin_dir / name, "#!/bin/sh\n" + body)
+
+    # Active firewall4: canonical inet/fw4 table exists.
+    command("fw4", "exit 0\n")
+    command("nft", "[ \"$*\" = \"list table inet fw4\" ] && exit 0\nexit 1\n")
+    result = json.loads(run(["/bin/sh", str(helper), "firewall-backend"], env=env))
+    assert result["backend"] == "fw4"
+
+    # Active firewall3: characteristic fw3 zone chain exists.
+    (bin_dir / "fw4").unlink()
+    (bin_dir / "nft").unlink()
+    command("fw3", "exit 0\n")
+    command("iptables-save", "printf '%s\\n' ':zone_lan_input - [0:0]'\n")
+    result = json.loads(run(["/bin/sh", str(helper), "firewall-backend"], env=env))
+    assert result["backend"] == "fw3"
+
+    # Both active rule systems are reported instead of silently preferring one.
+    command("fw4", "exit 0\n")
+    command("nft", "[ \"$*\" = \"list table inet fw4\" ] && exit 0\nexit 1\n")
+    result = json.loads(run(["/bin/sh", str(helper), "firewall-backend"], env=env))
+    assert result["backend"] == "mixed"
+
+    # Installed but unloaded firewall4 is distinguishable from active fw4.
+    (bin_dir / "fw3").unlink()
+    (bin_dir / "iptables-save").unlink()
+    command("nft", "exit 1\n")
+    result = json.loads(run(["/bin/sh", str(helper), "firewall-backend"], env=env))
+    assert result["backend"] == "fw4-stopped"
+
 def test_frontend_backend_contracts() -> None:
     app_js = (ROOT / "luci-app-nikki/htdocs/luci-static/resources/view/nikki/app.js").read_text()
     proxy_js = (ROOT / "luci-app-nikki/htdocs/luci-static/resources/view/nikki/proxy.js").read_text()
@@ -1222,7 +1267,7 @@ def test_frontend_backend_contracts() -> None:
         assert f"'{action}'" in app_js
         assert action in rpc_helper
         assert action in updater
-    for helper_action in ("version", "profile", "update-subscription", "core-status", "core-action", "api", "identifiers", "debug", "write-file"):
+    for helper_action in ("version", "profile", "update-subscription", "core-status", "core-action", "api", "identifiers", "firewall-backend", "debug", "write-file"):
         assert f"callNikki('{helper_action}'" in tools_js
         assert f"{helper_action})" in rpc_helper
 
@@ -1234,6 +1279,20 @@ def test_frontend_backend_contracts() -> None:
     assert "del(.dns.proxy-server-nameserver-policy)" in init
     assert "range(1, 3600)" in proxy_js
     assert "range(1, 60)" in proxy_js
+    assert "Current Firewall" in proxy_js
+    assert "firewallBackend()" in proxy_js
+
+    app_js = (ROOT / "luci-app-nikki/htdocs/luci-static/resources/view/nikki/app.js").read_text()
+    assert "function renderDnsNotice()" in app_js
+    assert "To ensure accurate DNS queries and traffic routing:" in app_js
+    assert "1. Manually disable: Network - Interfaces - DHCP/DNS - DNS Redirect" in app_js
+    assert "2. Disable encrypted DNS / secure DNS" in app_js
+    assert "Transparent Proxy with Mihomo on OpenWrt." not in app_js
+    assert "How To Use" not in app_js
+    assert "font-size:16px" in app_js
+    assert "font-size:15px" in app_js
+    assert "Legacy Backend" not in proxy_js
+    assert "IPv4 TCP: REDIRECT / TPROXY / TUN" not in proxy_js
     assert 'case "$tun_interval" in' in init and "|0) tun_interval=1" in init
     assert "tun_remaining" in init
 
@@ -1380,6 +1439,12 @@ def test_static() -> None:
     ):
         assert f"option '{old_key}'" not in conf
     assert "TUN" in proxy_js
+    assert "If you do not know what you are doing, do not change any settings on this page; keep the defaults." in proxy_js
+    assert "m = new form.Map(" in proxy_js
+    assert "_('Proxy Config'),\n            _('If you do not know what you are doing" in proxy_js
+    assert "m.section(form.NamedSection, 'proxy', 'proxy');" in proxy_js
+    assert "m.section(form.NamedSection, 'proxy', 'proxy', _('Proxy Config')" not in proxy_js
+    assert proxy_js.count("Experimental feature; not recommended.") == 2
     init = (ROOT / "nikki/files/nikki.init").read_text()
     assert 'PROG="/usr/libexec/nikki/mihomo"' in init
     assert "update_core" in init
@@ -1389,10 +1454,10 @@ def test_static() -> None:
     assert "tun_fw_mark" in init
     assert ".auto-route = false" in init
     assert ".auto-redirect = false" in init
-    assert "PKG_VERSION:=2026.07.18-v6" in makefile
+    assert "PKG_VERSION:=2026.07.17.legacy5.3" in makefile
     luci_makefile = (ROOT / "luci-app-nikki/Makefile").read_text()
-    assert "PKG_VERSION:=1.26.1-v6" in luci_makefile
-    assert "PKG_RELEASE:=1" in luci_makefile
+    assert "PKG_VERSION:=1.26.1.legacy5.3" in luci_makefile
+    assert "PKG_RELEASE:=10" in luci_makefile
     assert "Hooks/Prepare/Post += Prepare/SetNikkiRpcExecutable" in luci_makefile
     assert "chmod 0755 $(PKG_BUILD_DIR)/root/usr/libexec/nikki-rpc" in luci_makefile
     permission_fallback = (
@@ -1432,11 +1497,13 @@ def test_static() -> None:
     assert "coreInfo.resolved_url" in core_block
     assert "coreInfo.previous_version" in core_block
     assert "MetaCubeX Official Latest Version" in core_block
+    assert "o.default = 'https://github.com/MetaCubeX/mihomo/releases';" in core_block
     assert "persistCoreUpdateConfig(coreUpdateSection)" in core_block
     assert "Configuration changed. Save changes or check for updates again." in app_js
     assert "Configuration saved. Check for updates again." in app_js
     assert "section.parse()" in app_js
-    assert "uci.apply()" in app_js
+    assert "changedConfigs.length === 0" in app_js
+    assert "return uci.apply().then" in app_js
 
     test_frontend_backend_contracts()
     shell_files = list(ROOT.rglob("*.sh")) + list(ROOT.rglob("*.init"))
@@ -1471,6 +1538,7 @@ def main() -> None:
         test_core_archive_extraction(tmp)
         test_rpc_transactional_write(tmp)
         test_rpc_ipv6_wildcard(tmp)
+        test_rpc_firewall_backend_detection(tmp)
     print("All Nikki Legacy tests passed.")
 
 

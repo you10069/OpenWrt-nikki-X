@@ -178,6 +178,10 @@ return baseclass.extend({
         return callNikki('identifiers');
     },
 
+    firewallBackend: function () {
+        return callNikki('firewall-backend');
+    },
+
     listProfiles: function () {
         return L.resolveDefault(fs.list(this.profilesDir), []);
     },

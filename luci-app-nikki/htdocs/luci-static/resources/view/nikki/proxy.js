@@ -13,6 +13,7 @@ return view.extend({
             network.getHostHints(),
             network.getNetworks(),
             nikki.getIdentifiers(),
+            L.resolveDefault(nikki.firewallBackend(), { backend: 'unknown' }),
         ]);
     },
     render: function (data) {
@@ -20,20 +21,33 @@ return view.extend({
         const networks = data[2];
         const users = data[3]?.users ?? [];
         const groups = data[3]?.groups ?? [];
+        const firewallBackend = data[4]?.backend ?? 'unknown';
+        const firewallLabels = {
+            'fw3': _('firewall3 / iptables'),
+            'fw4': _('firewall4 / nftables'),
+            'mixed': _('Mixed state: firewall3 + firewall4'),
+            'fw3-stopped': _('firewall3 / iptables (not running)'),
+            'fw4-stopped': _('firewall4 / nftables (not running)'),
+            'unknown': _('Unknown or firewall not running')
+        };
 
         let m, s, o, so;
 
-        m = new form.Map('nikki');
+        m = new form.Map(
+            'nikki',
+            _('Proxy Config'),
+            _('If you do not know what you are doing, do not change any settings on this page; keep the defaults.')
+        );
 
-        s = m.section(form.NamedSection, 'proxy', 'proxy', _('Proxy Config'));
+        s = m.section(form.NamedSection, 'proxy', 'proxy');
 
         s.tab('proxy', _('Proxy Config'));
 
         o = s.taboption('proxy', form.Flag, 'enabled', _('Enable'));
         o.rmempty = false;
 
-        o = s.taboption('proxy', form.DummyValue, '_legacy_scope', _('Legacy Backend'));
-        o.default = _('IPv4 TCP: REDIRECT / TPROXY / TUN; IPv4 UDP: TPROXY / TUN; IPv6 TCP/UDP: TPROXY / TUN; IPv4 DNS: REDIRECT to Mihomo DNS; IPv6 DNS: TPROXY as transparent traffic.');
+        o = s.taboption('proxy', form.DummyValue, '_firewall_backend', _('Current Firewall'));
+        o.default = firewallLabels[firewallBackend] || firewallLabels.unknown;
 
         o = s.taboption('proxy', form.ListValue, 'ipv4_tcp_mode', _('IPv4 TCP Mode'));
         o.rmempty = false;
@@ -189,10 +203,10 @@ return view.extend({
 
         s.tab('bypass', _('Bypass'));
 
-        o = s.taboption('bypass', form.Flag, 'bypass_china_mainland_ip', _('Bypass China Mainland IP'));
+        o = s.taboption('bypass', form.Flag, 'bypass_china_mainland_ip', _('Bypass China Mainland IP'), _('Experimental feature; not recommended.'));
         o.rmempty = false;
 
-        o = s.taboption('bypass', form.Flag, 'bypass_china_mainland_ip6', _('Bypass China Mainland IP6'));
+        o = s.taboption('bypass', form.Flag, 'bypass_china_mainland_ip6', _('Bypass China Mainland IP6'), _('Experimental feature; not recommended.'));
         o.rmempty = false;
 
         o = s.taboption('bypass', form.Value, 'proxy_tcp_dport', _('Destination TCP Port to Proxy'));

@@ -1119,9 +1119,6 @@ msgstr ""
 msgid "procd Config"
 msgstr ""
 
-msgid "Legacy Backend"
-msgstr ""
-
 msgid "IPv4 TCP Mode"
 msgstr ""
 
@@ -1153,9 +1150,6 @@ msgid "REDIRECT TCP/UDP port 53 to the Mihomo DNS listener."
 msgstr ""
 
 msgid "TPROXY TCP/UDP port 53 to the Mihomo TPROXY listener as ordinary transparent traffic; it does not enter the built-in DNS listener."
-msgstr ""
-
-msgid "IPv4 TCP: REDIRECT / TPROXY / TUN; IPv4 UDP: TPROXY / TUN; IPv6 TCP/UDP: TPROXY / TUN; IPv4 DNS: REDIRECT to Mihomo DNS; IPv6 DNS: TPROXY as transparent traffic."
 msgstr ""
 
 msgid "Device Architecture"
@@ -1352,4 +1346,45 @@ msgid "Configuration saved. Check for updates again."
 msgstr ""
 
 msgid "Core update configuration saved."
+msgstr ""
+
+msgid "Current Firewall"
+msgstr ""
+
+msgid "firewall3 / iptables"
+msgstr ""
+
+msgid "firewall4 / nftables"
+msgstr ""
+
+msgid "Mixed state: firewall3 + firewall4"
+msgstr ""
+
+msgid "firewall3 / iptables (not running)"
+msgstr ""
+
+msgid "firewall4 / nftables (not running)"
+msgstr ""
+
+msgid "Unknown or firewall not running"
+msgstr ""
+
+#: applications/luci-app-nikki/htdocs/luci-static/resources/view/nikki/app.js
+msgid "To ensure accurate DNS queries and traffic routing:"
+msgstr ""
+
+#: applications/luci-app-nikki/htdocs/luci-static/resources/view/nikki/app.js
+msgid "1. Manually disable: Network - Interfaces - DHCP/DNS - DNS Redirect"
+msgstr ""
+
+#: applications/luci-app-nikki/htdocs/luci-static/resources/view/nikki/app.js
+msgid "2. Disable encrypted DNS / secure DNS in operating systems, browsers, and other software on computers and phones"
+msgstr ""
+
+#: applications/luci-app-nikki/htdocs/luci-static/resources/view/nikki/proxy.js
+msgid "If you do not know what you are doing, do not change any settings on this page; keep the defaults."
+msgstr ""
+
+#: applications/luci-app-nikki/htdocs/luci-static/resources/view/nikki/proxy.js
+msgid "Experimental feature; not recommended."
 msgstr ""

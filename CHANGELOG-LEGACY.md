@@ -1,3 +1,40 @@
+## 2026-07-18 · Proxy page-level safety notice (r10)
+
+- Moved the general safety warning from the proxy form section to the native LuCI page description under the main Proxy Config title.
+- Kept the top navigation tabs and the lower Proxy Config / Router Proxy / LAN Proxy / Bypass / Misc tabs unchanged.
+- Retained the two per-option experimental warnings for mainland China IPv4 and IPv6 bypass.
+
+## 2026-07-18 · Proxy configuration safety notices (r9)
+
+- Added a warning below the Proxy Config heading advising users to keep defaults unless they understand the settings.
+- Marked both China mainland IPv4 and IPv6 bypass switches as experimental and not recommended.
+- Kept the existing defaults and proxy behavior unchanged.
+
+## 2026-07-18 · Default official Releases URL in custom mode (r8)
+
+- Added `https://github.com/MetaCubeX/mihomo/releases` as the LuCI default for the Custom Releases URL field.
+- Selecting the custom Releases mode now shows the official MetaCubeX Releases address when no address has been saved.
+- Existing user-defined Releases addresses remain unchanged and are never overwritten.
+
+## 2026-07-18 · LuCI DNS notice (r7)
+
+- Removed the generic homepage description and wiki usage link.
+- Added a lightweight, larger DNS configuration notice below the page title.
+- The notice reminds users to disable OpenWrt DNS Redirect and client-side encrypted/secure DNS.
+
+## 2026-07-18 — Dynamic firewall backend status (r6)
+
+- Replaced the fixed Legacy Backend capability sentence on the proxy page with a read-only Current Firewall row.
+- Detect active firewall4 through the canonical `table inet fw4` and active firewall3 through characteristic fw3 iptables chains.
+- Report active fw3, active fw4, mixed rules, installed-but-stopped backends, or an unknown/stopped state without creating or changing firewall rules.
+- Added LuCI translations and regression tests for the new RPC/frontend contract.
+
+## 2026-07-18 — LuCI core update save compatibility fix (r5)
+
+- Avoid calling `uci.apply()` when there are no pending UCI changes.
+- Fix `RPC call to uci/apply failed with ubus code 5` on OpenWrt 21.02.
+- Allow repeated **Check Update** and **Update Core** operations when configuration is already saved.
+
 ## 2026.07.18.legacy5.3-r4
 
 - Renamed the official updater source to MetaCubeX Official Latest Version while retaining the Custom Releases URL option for pinned tags.

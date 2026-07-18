@@ -22,6 +22,30 @@ const coreUpdateConfigOptions = [
     'min_free_kb'
 ];
 
+function renderDnsNotice() {
+    return E('div', {
+        class: 'nikki-dns-notice',
+        style: [
+            'margin:8px 0 18px',
+            'padding:12px 14px',
+            'border-left:4px solid #f0ad4e',
+            'border-radius:3px',
+            'background:rgba(240,173,78,0.08)',
+            'color:inherit'
+        ].join(';')
+    }, [
+        E('div', {
+            style: 'font-size:16px;font-weight:600;line-height:1.6;margin-bottom:4px;'
+        }, [_('To ensure accurate DNS queries and traffic routing:')]),
+        E('div', {
+            style: 'font-size:15px;line-height:1.8;overflow-wrap:anywhere;'
+        }, [
+            E('div', {}, [_('1. Manually disable: Network - Interfaces - DHCP/DNS - DNS Redirect')]),
+            E('div', {}, [_('2. Disable encrypted DNS / secure DNS in operating systems, browsers, and other software on computers and phones')])
+        ])
+    ]);
+}
+
 function renderStatus(running) {
     return updateStatus(E('input', { id: 'core_status', style: 'border: unset; font-style: italic; font-weight: bold;', readonly: '' }), running);
 }
@@ -84,9 +108,21 @@ function markCoreUpdateSaved() {
 function persistCoreUpdateConfig(section) {
     section.map.checkDepends();
     return section.parse()
-        .then(uci.save.bind(uci))
-        .then(function () { return uci.apply(); })
-        .then(function () { markCoreUpdateSaved(); });
+        .then(function () { return uci.save(); })
+        .then(function (changedConfigs) {
+            // rpcd on OpenWrt 21.02 returns UBUS_STATUS_NO_DATA when
+            // uci.apply is called without any pending session changes.
+            // Skip apply in that case so repeated checks and updates can
+            // continue even when the form already matches the saved config.
+            if (!Array.isArray(changedConfigs) || changedConfigs.length === 0)
+                return false;
+
+            return uci.apply().then(function () { return true; });
+        })
+        .then(function (applied) {
+            markCoreUpdateSaved();
+            return applied;
+        });
 }
 
 function saveCoreUpdateConfig(section, event) {
@@ -201,7 +237,7 @@ return view.extend({
 
         let m, s, o;
 
-        m = new form.Map('nikki', _('Nikki-X'), `${_('Transparent Proxy with Mihomo on OpenWrt.')} <a href="https://github.com/nikkinikki-org/OpenWrt-nikki/wiki" target="_blank">${_('How To Use')}</a>`);
+        m = new form.Map('nikki', _('Nikki'));
 
         s = m.section(form.TableSection, 'status', _('Status'));
         s.anonymous = true;
@@ -306,6 +342,7 @@ return view.extend({
         o.rmempty = false;
 
         o = s.option(form.Value, 'releases_url', _('Releases URL'));
+        o.default = 'https://github.com/MetaCubeX/mihomo/releases';
         o.placeholder = 'https://example.com/releases';
         o.depends('source_type', 'release');
         o.rmempty = false;
@@ -481,6 +518,14 @@ return view.extend({
         o.rmempty = false;
 
         return m.render().then(function (root) {
+            const notice = renderDnsNotice();
+            const heading = root.querySelector('h2');
+
+            if (heading?.parentNode)
+                heading.parentNode.insertBefore(notice, heading.nextSibling);
+            else
+                root.insertBefore(notice, root.firstChild);
+
             trackCoreUpdateChanges(root);
             return root;
         });

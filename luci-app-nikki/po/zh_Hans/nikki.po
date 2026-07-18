@@ -1126,9 +1126,6 @@ msgstr "用户名"
 msgid "procd Config"
 msgstr "procd 配置"
 
-msgid "Legacy Backend"
-msgstr "旧版后端"
-
 msgid "IPv4 TCP Mode"
 msgstr "IPv4 TCP 模式"
 
@@ -1161,9 +1158,6 @@ msgstr "将 TCP/UDP 53 端口重定向到 Mihomo DNS 监听端口。"
 
 msgid "TPROXY TCP/UDP port 53 to the Mihomo TPROXY listener as ordinary transparent traffic; it does not enter the built-in DNS listener."
 msgstr "将 TCP/UDP 53 端口作为普通透明流量 TPROXY 到 Mihomo TPROXY 监听端口；不会进入内置 DNS 监听端口。"
-
-msgid "IPv4 TCP: REDIRECT / TPROXY / TUN; IPv4 UDP: TPROXY / TUN; IPv6 TCP/UDP: TPROXY / TUN; IPv4 DNS: REDIRECT to Mihomo DNS; IPv6 DNS: TPROXY as transparent traffic."
-msgstr "IPv4 TCP：REDIRECT / TPROXY / TUN；IPv4 UDP：TPROXY / TUN；IPv6 TCP/UDP：TPROXY / TUN；IPv4 DNS：重定向到 Mihomo DNS；IPv6 DNS：作为透明流量通过 TPROXY。"
 
 msgid "Device Architecture"
 msgstr "设备架构"
@@ -1360,3 +1354,44 @@ msgstr "配置已保存，请重新检查更新"
 
 msgid "Core update configuration saved."
 msgstr "内核更新配置已保存。"
+
+msgid "Current Firewall"
+msgstr "当前防火墙"
+
+msgid "firewall3 / iptables"
+msgstr "firewall3 / iptables"
+
+msgid "firewall4 / nftables"
+msgstr "firewall4 / nftables"
+
+msgid "Mixed state: firewall3 + firewall4"
+msgstr "混合状态：firewall3 + firewall4"
+
+msgid "firewall3 / iptables (not running)"
+msgstr "firewall3 / iptables（未运行）"
+
+msgid "firewall4 / nftables (not running)"
+msgstr "firewall4 / nftables（未运行）"
+
+msgid "Unknown or firewall not running"
+msgstr "未知或防火墙未运行"
+
+#: applications/luci-app-nikki/htdocs/luci-static/resources/view/nikki/app.js
+msgid "To ensure accurate DNS queries and traffic routing:"
+msgstr "为了准确进行 DNS 查询和分流："
+
+#: applications/luci-app-nikki/htdocs/luci-static/resources/view/nikki/app.js
+msgid "1. Manually disable: Network - Interfaces - DHCP/DNS - DNS Redirect"
+msgstr "1、请手动关掉：网络 - 接口 - DHCP/DNS - DNS 重定向"
+
+#: applications/luci-app-nikki/htdocs/luci-static/resources/view/nikki/app.js
+msgid "2. Disable encrypted DNS / secure DNS in operating systems, browsers, and other software on computers and phones"
+msgstr "2、电脑、手机等请关掉系统和浏览器等软件的加密 DNS/安全 DNS"
+
+#: applications/luci-app-nikki/htdocs/luci-static/resources/view/nikki/proxy.js
+msgid "If you do not know what you are doing, do not change any settings on this page; keep the defaults."
+msgstr "如果你不知道你在做什么，本页所有设置请勿乱动，默认即可。"
+
+#: applications/luci-app-nikki/htdocs/luci-static/resources/view/nikki/proxy.js
+msgid "Experimental feature; not recommended."
+msgstr "实验性功能，不建议开启。"
