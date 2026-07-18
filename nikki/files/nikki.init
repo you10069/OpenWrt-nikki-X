@@ -283,17 +283,112 @@ start_service() {
 		if [ "$overwrite_sniffer_sniff" = 1 ]; then
 			yq -M -i 'del(.sniffer.sniff)' "$RUN_PROFILE_PATH"
 		fi
-		local generated_mixin; generated_mixin="$TEMP_DIR/mixin.json"
-		if ! "$MIXIN_SH" > "$generated_mixin" || ! yq -M -p json -o json -e '.' "$generated_mixin" >/dev/null 2>&1; then
-			log "Mixin" "Failed to generate a valid JSON mixin."
+		local subscription_json custom_mixin_json luci_mixin_json merged_json runtime_profile_tmp mixin_error
+		subscription_json="$TEMP_DIR/subscription.json"
+		custom_mixin_json="$TEMP_DIR/custom-mixin.json"
+		luci_mixin_json="$TEMP_DIR/luci-mixin.json"
+		merged_json="$TEMP_DIR/merged.json"
+		runtime_profile_tmp="$RUN_PROFILE_PATH.tmp"
+		mixin_error="$TEMP_DIR/mixin.err"
+
+		rm -f "$subscription_json" "$custom_mixin_json" "$luci_mixin_json" \
+			"$merged_json" "$runtime_profile_tmp" "$mixin_error"
+
+		# Convert the selected YAML profile/subscription to JSON.
+		if ! yq -M -p yaml -o json '.' "$RUN_PROFILE_PATH" \
+			> "$subscription_json" 2> "$mixin_error"; then
+			log "Mixin" "Failed to convert the profile to JSON."
+			[ -s "$mixin_error" ] && log "Mixin" "$(head -n 1 "$mixin_error")"
 			log "App" "Exit."
 			return
 		fi
-		if [ "$mixin_file_content" = 0 ]; then
-			yq -M -i eval-all '... comments="" | . as $item ireduce ({}; . * $item ) | .proxies = .nikki-proxies + .proxies | del(.nikki-proxies) | .proxy-groups = .nikki-proxy-groups + .proxy-groups | del(.nikki-proxy-groups) | .rules = .nikki-rules + .rules | del(.nikki-rules) | explode(.)' "$RUN_PROFILE_PATH" "$generated_mixin"
-		elif [ "$mixin_file_content" = 1 ]; then
-			yq -M -i eval-all '... comments="" | . as $item ireduce ({}; . * $item ) | .proxies = .nikki-proxies + .proxies | del(.nikki-proxies) | .proxy-groups = .nikki-proxy-groups + .proxy-groups | del(.nikki-proxy-groups) | .rules = .nikki-rules + .rules | del(.nikki-rules) | explode(.)' "$RUN_PROFILE_PATH" "$MIXIN_FILE_PATH" "$generated_mixin"
+		if [ ! -s "$subscription_json" ]; then
+			log "Mixin" "Converted profile JSON is empty."
+			log "App" "Exit."
+			return
 		fi
+
+		# Generate the LuCI/UCI mixin as JSON.
+		if ! /bin/sh "$MIXIN_SH" > "$luci_mixin_json" 2> "$mixin_error"; then
+			log "Mixin" "Failed to generate the LuCI mixin JSON."
+			[ -s "$mixin_error" ] && log "Mixin" "$(head -n 1 "$mixin_error")"
+			log "App" "Exit."
+			return
+		fi
+		if [ ! -s "$luci_mixin_json" ]; then
+			log "Mixin" "Generated LuCI mixin JSON is empty."
+			log "App" "Exit."
+			return
+		fi
+		if ! yq -M -p json -o json -e '.' "$luci_mixin_json" \
+			>/dev/null 2> "$mixin_error"; then
+			log "Mixin" "Generated LuCI mixin is invalid JSON."
+			[ -s "$mixin_error" ] && log "Mixin" "$(head -n 1 "$mixin_error")"
+			log "App" "Exit."
+			return
+		fi
+
+		# Convert the optional custom YAML mixin to JSON.
+		if [ "$mixin_file_content" = 1 ]; then
+			if ! yq -M -p yaml -o json '. // {}' "$MIXIN_FILE_PATH" \
+				> "$custom_mixin_json" 2> "$mixin_error"; then
+				log "Mixin" "Failed to convert the custom mixin to JSON."
+				[ -s "$mixin_error" ] && log "Mixin" "$(head -n 1 "$mixin_error")"
+				log "App" "Exit."
+				return
+			fi
+			if [ ! -s "$custom_mixin_json" ]; then
+				log "Mixin" "Converted custom mixin JSON is empty."
+				log "App" "Exit."
+				return
+			fi
+		fi
+
+		local merge_expression
+		merge_expression='. as $item ireduce ({}; . * $item ) | .proxies = ((."nikki-proxies" // []) + (.proxies // [])) | del(."nikki-proxies") | ."proxy-groups" = ((."nikki-proxy-groups" // []) + (."proxy-groups" // [])) | del(."nikki-proxy-groups") | .rules = ((."nikki-rules" // []) + (.rules // [])) | del(."nikki-rules") | explode(.)'
+
+		# Merge inputs as JSON. Later inputs have higher priority.
+		if [ "$mixin_file_content" = 0 ]; then
+			if ! yq -M -p json -o json eval-all "$merge_expression" \
+				"$subscription_json" "$luci_mixin_json" \
+				> "$merged_json" 2> "$mixin_error"; then
+				log "Mixin" "Failed to merge the JSON configuration."
+				[ -s "$mixin_error" ] && log "Mixin" "$(head -n 1 "$mixin_error")"
+				log "App" "Exit."
+				return
+			fi
+		elif [ "$mixin_file_content" = 1 ]; then
+			if ! yq -M -p json -o json eval-all "$merge_expression" \
+				"$subscription_json" "$custom_mixin_json" "$luci_mixin_json" \
+				> "$merged_json" 2> "$mixin_error"; then
+				log "Mixin" "Failed to merge the JSON configuration."
+				[ -s "$mixin_error" ] && log "Mixin" "$(head -n 1 "$mixin_error")"
+				log "App" "Exit."
+				return
+			fi
+		fi
+		if [ ! -s "$merged_json" ]; then
+			log "Mixin" "Merged JSON configuration is empty."
+			log "App" "Exit."
+			return
+		fi
+
+		# Convert the merged JSON back to the existing runtime YAML path.
+		if ! yq -M -p json -o yaml -P '.' "$merged_json" \
+			> "$runtime_profile_tmp" 2> "$mixin_error"; then
+			log "Mixin" "Failed to convert the merged JSON to YAML."
+			[ -s "$mixin_error" ] && log "Mixin" "$(head -n 1 "$mixin_error")"
+			rm -f "$runtime_profile_tmp"
+			log "App" "Exit."
+			return
+		fi
+		if [ ! -s "$runtime_profile_tmp" ]; then
+			log "Mixin" "Generated runtime YAML is empty."
+			rm -f "$runtime_profile_tmp"
+			log "App" "Exit."
+			return
+		fi
+		mv -f "$runtime_profile_tmp" "$RUN_PROFILE_PATH"
 		if [ "$proxy_enabled" = 1 ]; then
 			local tun_mode_active; tun_mode_active=0
 			case "$ipv4_tcp_mode:$ipv4_udp_mode:$ipv6_tcp_mode:$ipv6_udp_mode" in *tun*) tun_mode_active=1 ;; esac
