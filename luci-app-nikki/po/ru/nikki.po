@@ -1327,3 +1327,24 @@ msgstr ""
 
 msgid "Resolved URL"
 msgstr ""
+
+msgid "Current Version"
+msgstr "Текущая версия"
+
+msgid "Update Version"
+msgstr "Версия обновления"
+
+msgid "Update File"
+msgstr "Файл обновления"
+
+msgid "Update Address"
+msgstr "Адрес обновления"
+
+msgid "Saved Previous Version"
+msgstr "Сохранённая предыдущая версия"
+
+msgid "Rollback to Previous Version"
+msgstr "Откатиться к предыдущей версии"
+
+msgid "Delete Previous Version Now"
+msgstr "Немедленно удалить предыдущую версию"

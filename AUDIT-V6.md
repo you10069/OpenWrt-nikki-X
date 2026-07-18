@@ -1,4 +1,4 @@
-# Nikki Legacy V5.3 release audit
+# Nikki Legacy V6 release audit
 
 ## Scope
 

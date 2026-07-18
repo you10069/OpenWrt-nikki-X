@@ -1390,7 +1390,48 @@ def test_static() -> None:
     assert ".auto-route = false" in init
     assert ".auto-redirect = false" in init
     assert "PKG_VERSION:=2026.07.17.legacy5.3" in makefile
-    assert "PKG_VERSION:=1.26.1.legacy5.3" in (ROOT / "luci-app-nikki/Makefile").read_text()
+    luci_makefile = (ROOT / "luci-app-nikki/Makefile").read_text()
+    assert "PKG_VERSION:=1.26.1.legacy5.3" in luci_makefile
+    assert "PKG_RELEASE:=3" in luci_makefile
+    assert "Hooks/Prepare/Post += Prepare/SetNikkiRpcExecutable" in luci_makefile
+    assert "chmod 0755 $(PKG_BUILD_DIR)/root/usr/libexec/nikki-rpc" in luci_makefile
+    permission_fallback = (
+        ROOT / "luci-app-nikki/root/etc/uci-defaults/99_nikki_rpc_permissions"
+    ).read_text()
+    assert "chmod 0755 /usr/libexec/nikki-rpc" in permission_fallback
+
+    app_js = (ROOT / "luci-app-nikki/htdocs/luci-static/resources/view/nikki/app.js").read_text()
+    status_start = app_js.index("form.TableSection, 'status'")
+    status_end = app_js.index("form.NamedSection, 'config'", status_start)
+    status_block = app_js[status_start:status_end]
+    for label in (
+        "App Version", "Core Version", "Core Status", "Reload Service",
+        "Restart Service", "Update Dashboard", "Open Dashboard",
+    ):
+        assert label in status_block
+    for moved_label in (
+        "Device Architecture", "Current Version", "Update Version",
+        "Update Source", "Update File", "Update Address", "Update Status",
+        "Check Update", "Update Core", "Saved Previous Version",
+        "Rollback to Previous Version", "Delete Previous Version Now",
+    ):
+        assert moved_label not in status_block
+
+    core_start = app_js.index("form.NamedSection, 'core_update'")
+    core_end = app_js.index("form.NamedSection, 'procd'", core_start)
+    core_block = app_js[core_start:core_end]
+    ordered_labels = (
+        "Device Architecture", "Current Version", "Update Version",
+        "Update Source", "Update File", "Update Address", "Update Status",
+        "Check Update", "Update Core", "Saved Previous Version",
+        "Rollback to Previous Version", "Delete Previous Version Now",
+    )
+    positions = [core_block.index(label) for label in ordered_labels]
+    assert positions == sorted(positions)
+    assert "coreInfo.resolved_asset" in core_block
+    assert "coreInfo.resolved_url" in core_block
+    assert "coreInfo.previous_version" in core_block
+
     test_frontend_backend_contracts()
     shell_files = list(ROOT.rglob("*.sh")) + list(ROOT.rglob("*.init"))
     for path in shell_files:

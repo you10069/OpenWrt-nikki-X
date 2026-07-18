@@ -40,6 +40,14 @@ function coreStatusText(info) {
     return text;
 }
 
+function renderInfoValue(value, wrapAnywhere) {
+    return E('span', {
+        style: wrapAnywhere
+            ? 'display:inline-block;max-width:100%;overflow-wrap:anywhere;word-break:break-all;'
+            : 'display:inline-block;max-width:100%;overflow-wrap:anywhere;'
+    }, [textOrDash(value)]);
+}
+
 function runCoreAction(action, event, successMessage) {
     const button = event?.currentTarget;
     if (button)
@@ -81,6 +89,7 @@ return view.extend({
     render: function (data) {
         const subscriptions = uci.sections('nikki', 'subscription');
         const appVersion = data[1].app ?? '';
+        const coreVersion = data[1].core ?? '';
         const coreInfo = data[2] || {};
         const running = data[3];
         const profiles = data[4];
@@ -98,48 +107,9 @@ return view.extend({
         o.load = function () { return appVersion; };
         o.write = function () { };
 
-        o = s.option(form.Value, '_device_architecture', _('Device Architecture'));
+        o = s.option(form.Value, '_core_version', _('Core Version'));
         o.readonly = true;
-        o.load = function () { return textOrDash(architecture); };
-        o.write = function () { };
-
-        o = s.option(form.Value, '_core_version', _('Current Running Version'));
-        o.readonly = true;
-        o.load = function () { return textOrDash(coreInfo.current_version); };
-        o.write = function () { };
-
-        o = s.option(form.DummyValue, '_previous_version', _('Previous Version'));
-        o.cfgvalue = function () {
-            return E('div', { style: 'display:flex;align-items:center;gap:.5rem;flex-wrap:wrap' }, [
-                E('span', {}, [textOrDash(coreInfo.previous_version)]),
-                actionButton(_('Rollback'), 'action', 'rollback', !!coreInfo.previous_version, _('Core rollback completed.')),
-                actionButton(_('Delete'), 'negative', 'delete-previous', !!coreInfo.previous_version, _('Previous core deleted.'))
-            ]);
-        };
-
-        o = s.option(form.Value, '_latest_version', _('Latest Version'));
-        o.readonly = true;
-        o.load = function () { return textOrDash(coreInfo.latest_version); };
-        o.write = function () { };
-
-        o = s.option(form.Value, '_update_source', _('Update Source'));
-        o.readonly = true;
-        o.load = function () { return textOrDash(coreInfo.source); };
-        o.write = function () { };
-
-        o = s.option(form.Value, '_resolved_asset', _('Resolved Asset'));
-        o.readonly = true;
-        o.load = function () { return textOrDash(coreInfo.resolved_asset); };
-        o.write = function () { };
-
-        o = s.option(form.Value, '_resolved_url', _('Resolved URL'));
-        o.readonly = true;
-        o.load = function () { return textOrDash(coreInfo.resolved_url); };
-        o.write = function () { };
-
-        o = s.option(form.Value, '_update_status', _('Update Status'));
-        o.readonly = true;
-        o.load = function () { return coreStatusText(coreInfo); };
+        o.load = function () { return textOrDash(coreVersion); };
         o.write = function () { };
 
         o = s.option(form.DummyValue, '_core_status', _('Core Status'));
@@ -149,14 +119,6 @@ return view.extend({
                 updateStatus(document.getElementById('core_status'), isRunning);
             });
         });
-
-        o = s.option(form.DummyValue, '_core_update_actions', _('Core Update'));
-        o.cfgvalue = function () {
-            return E('div', { style: 'display:flex;gap:.5rem;flex-wrap:wrap' }, [
-                actionButton(_('Check Update'), 'action', 'check', true, _('Update source checked.')),
-                actionButton(_('Update Core'), 'positive', 'update', true, _('Core updated successfully.'))
-            ]);
-        };
 
         o = s.option(form.Button, 'reload');
         o.inputstyle = 'action';
@@ -273,6 +235,51 @@ return view.extend({
         o.default = '32768';
         o.rmempty = false;
         o.description = _('In KiB. Insufficient storage returns an error without replacing either core slot.');
+
+
+        o = s.option(form.DummyValue, '_device_architecture', _('Device Architecture'));
+        o.cfgvalue = function () { return renderInfoValue(architecture); };
+
+        o = s.option(form.DummyValue, '_current_version', _('Current Version'));
+        o.cfgvalue = function () { return renderInfoValue(coreInfo.current_version); };
+
+        o = s.option(form.DummyValue, '_update_version', _('Update Version'));
+        o.cfgvalue = function () { return renderInfoValue(coreInfo.latest_version); };
+
+        o = s.option(form.DummyValue, '_update_source', _('Update Source'));
+        o.cfgvalue = function () { return renderInfoValue(coreInfo.source, true); };
+
+        o = s.option(form.DummyValue, '_update_file', _('Update File'));
+        o.cfgvalue = function () { return renderInfoValue(coreInfo.resolved_asset, true); };
+
+        o = s.option(form.DummyValue, '_update_address', _('Update Address'));
+        o.cfgvalue = function () { return renderInfoValue(coreInfo.resolved_url, true); };
+
+        o = s.option(form.DummyValue, '_update_status', _('Update Status'));
+        o.cfgvalue = function () { return renderInfoValue(coreStatusText(coreInfo), true); };
+
+        o = s.option(form.DummyValue, '_check_update', _('Check Update'));
+        o.cfgvalue = function () {
+            return actionButton(_('Check Update'), 'action', 'check', true, _('Update source checked.'));
+        };
+
+        o = s.option(form.DummyValue, '_update_core', _('Update Core'));
+        o.cfgvalue = function () {
+            return actionButton(_('Update Core'), 'positive', 'update', true, _('Core updated successfully.'));
+        };
+
+        o = s.option(form.DummyValue, '_saved_previous_version', _('Saved Previous Version'));
+        o.cfgvalue = function () { return renderInfoValue(coreInfo.previous_version); };
+
+        o = s.option(form.DummyValue, '_rollback_previous', _('Rollback to Previous Version'));
+        o.cfgvalue = function () {
+            return actionButton(_('Rollback to Previous Version'), 'action', 'rollback', !!coreInfo.previous_version, _('Core rollback completed.'));
+        };
+
+        o = s.option(form.DummyValue, '_delete_previous', _('Delete Previous Version Now'));
+        o.cfgvalue = function () {
+            return actionButton(_('Delete Previous Version Now'), 'negative', 'delete-previous', !!coreInfo.previous_version, _('Previous core deleted.'));
+        };
 
         s = m.section(form.NamedSection, 'procd', 'procd', _('procd Config'));
 

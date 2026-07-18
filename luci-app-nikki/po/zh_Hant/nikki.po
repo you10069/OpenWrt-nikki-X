@@ -1327,3 +1327,24 @@ msgstr "已匹配檔案"
 
 msgid "Resolved URL"
 msgstr "實際下載位址"
+
+msgid "Current Version"
+msgstr "目前版本"
+
+msgid "Update Version"
+msgstr "更新版本"
+
+msgid "Update File"
+msgstr "更新檔案"
+
+msgid "Update Address"
+msgstr "更新位址"
+
+msgid "Saved Previous Version"
+msgstr "已儲存的上一個版本"
+
+msgid "Rollback to Previous Version"
+msgstr "回退到上一個版本"
+
+msgid "Delete Previous Version Now"
+msgstr "立即刪除上一個版本"

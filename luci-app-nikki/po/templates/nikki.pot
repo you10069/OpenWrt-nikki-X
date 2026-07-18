@@ -1320,3 +1320,24 @@ msgstr ""
 
 msgid "Resolved URL"
 msgstr ""
+
+msgid "Current Version"
+msgstr ""
+
+msgid "Update Version"
+msgstr ""
+
+msgid "Update File"
+msgstr ""
+
+msgid "Update Address"
+msgstr ""
+
+msgid "Saved Previous Version"
+msgstr ""
+
+msgid "Rollback to Previous Version"
+msgstr ""
+
+msgid "Delete Previous Version Now"
+msgstr ""

@@ -1184,7 +1184,7 @@ msgid "Latest Version"
 msgstr "最新版本"
 
 msgid "Update Source"
-msgstr "更新源"
+msgstr "更新来源"
 
 msgid "Update Status"
 msgstr "更新状态"
@@ -1327,3 +1327,24 @@ msgstr "已匹配文件"
 
 msgid "Resolved URL"
 msgstr "实际下载地址"
+
+msgid "Current Version"
+msgstr "当前版本"
+
+msgid "Update Version"
+msgstr "更新版本"
+
+msgid "Update File"
+msgstr "更新文件"
+
+msgid "Update Address"
+msgstr "更新地址"
+
+msgid "Saved Previous Version"
+msgstr "已保存的上个版本"
+
+msgid "Rollback to Previous Version"
+msgstr "回退到上个版本"
+
+msgid "Delete Previous Version Now"
+msgstr "立即删除上个版本"
