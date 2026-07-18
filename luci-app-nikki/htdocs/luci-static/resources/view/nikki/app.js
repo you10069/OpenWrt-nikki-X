@@ -416,6 +416,9 @@ return view.extend({
         o.rmempty = false;
         o.description = _('In KiB. Insufficient storage returns an error without replacing either core slot.');
 
+        o = s.option(form.DummyValue, '_save_core_update', _('Save Changes'));
+        o.cfgvalue = function () { return saveButton(coreUpdateSection); };
+
 
         o = s.option(form.DummyValue, '_device_architecture', _('Device Architecture'));
         o.cfgvalue = function () { return renderInfoValue(architecture); };
@@ -436,9 +439,6 @@ return view.extend({
 
         o = s.option(form.DummyValue, '_update_address', _('Update Address'));
         o.cfgvalue = function () { return renderInfoValue(coreInfo.resolved_url, true); };
-
-        o = s.option(form.DummyValue, '_save_core_update', _('Save Changes'));
-        o.cfgvalue = function () { return saveButton(coreUpdateSection); };
 
         o = s.option(form.DummyValue, '_update_status', _('Update Status'));
         o.cfgvalue = function () { return renderInfoValue(coreStatusText(coreInfo), true); };
