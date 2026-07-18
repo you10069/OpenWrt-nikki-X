@@ -1391,8 +1391,8 @@ def test_static() -> None:
     assert ".auto-redirect = false" in init
     assert "PKG_VERSION:=2026.07.17.legacy5.3" in makefile
     luci_makefile = (ROOT / "luci-app-nikki/Makefile").read_text()
-    assert "PKG_VERSION:=1.26.1.legacy5.3" in luci_makefile
-    assert "PKG_RELEASE:=4" in luci_makefile
+    assert "PKG_VERSION:=1.26.1-v6" in luci_makefile
+    assert "PKG_RELEASE:=1" in luci_makefile
     assert "Hooks/Prepare/Post += Prepare/SetNikkiRpcExecutable" in luci_makefile
     assert "chmod 0755 $(PKG_BUILD_DIR)/root/usr/libexec/nikki-rpc" in luci_makefile
     permission_fallback = (
