@@ -1389,7 +1389,7 @@ def test_static() -> None:
     assert "tun_fw_mark" in init
     assert ".auto-route = false" in init
     assert ".auto-redirect = false" in init
-    assert "PKG_VERSION:=2026.07.17.legacy5.3" in makefile
+    assert "PKG_VERSION:=2026.07.18-v6" in makefile
     luci_makefile = (ROOT / "luci-app-nikki/Makefile").read_text()
     assert "PKG_VERSION:=1.26.1-v6" in luci_makefile
     assert "PKG_RELEASE:=1" in luci_makefile
