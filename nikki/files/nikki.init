@@ -8,6 +8,10 @@ PROG="/usr/libexec/nikki/mihomo"
 
 . "$IPKG_INSTROOT/etc/nikki/scripts/include.sh"
 
+run_yq() {
+	/usr/bin/yq "$@" </dev/null
+}
+
 remove_tproxy_policy_route() {
 	local family="$1" mark="$2" mask="$3" pref="$4" table="$5" prefix
 	[ "$family" = 6 ] && prefix='::/0' || prefix='0.0.0.0/0'
@@ -254,34 +258,34 @@ start_service() {
 	if [ "$core_only" = 0 ]; then
 		log "Mixin" "Mixin config."
 		if [ "$overwrite_authentication" = 1 ]; then
-			yq -M -i 'del(.authentication)' "$RUN_PROFILE_PATH"
+			run_yq -M -i 'del(.authentication)' "$RUN_PROFILE_PATH"
 		fi
 		if [ "$overwrite_tun_dns_hijack" = 1 ]; then
-			yq -M -i 'del(.tun.dns-hijack)' "$RUN_PROFILE_PATH"
+			run_yq -M -i 'del(.tun.dns-hijack)' "$RUN_PROFILE_PATH"
 		fi
 		if [ "$overwrite_fake_ip_filter" = 1 ]; then
-			yq -M -i 'del(.dns.fake-ip-filter)' "$RUN_PROFILE_PATH"
+			run_yq -M -i 'del(.dns.fake-ip-filter)' "$RUN_PROFILE_PATH"
 		fi
 		if [ "$overwrite_hosts" = 1 ]; then
-			yq -M -i 'del(.hosts)' "$RUN_PROFILE_PATH"
+			run_yq -M -i 'del(.hosts)' "$RUN_PROFILE_PATH"
 		fi
 		if [ "$overwrite_dns_nameserver" = 1 ]; then
-			yq -M -i 'del(.dns.default-nameserver) | del(.dns.proxy-server-nameserver) | del(.dns.direct-nameserver) | del(.dns.nameserver) | del(.dns.fallback) ' "$RUN_PROFILE_PATH"
+			run_yq -M -i 'del(.dns.default-nameserver) | del(.dns.proxy-server-nameserver) | del(.dns.direct-nameserver) | del(.dns.nameserver) | del(.dns.fallback) ' "$RUN_PROFILE_PATH"
 		fi
 		if [ "$overwrite_dns_proxy_server_nameserver_policy" = 1 ]; then
-			yq -M -i 'del(.dns.proxy-server-nameserver-policy)' "$RUN_PROFILE_PATH"
+			run_yq -M -i 'del(.dns.proxy-server-nameserver-policy)' "$RUN_PROFILE_PATH"
 		fi
 		if [ "$overwrite_dns_nameserver_policy" = 1 ]; then
-			yq -M -i 'del(.dns.nameserver-policy)' "$RUN_PROFILE_PATH"
+			run_yq -M -i 'del(.dns.nameserver-policy)' "$RUN_PROFILE_PATH"
 		fi
 		if [ "$overwrite_sniffer_force_domain_name" = 1 ]; then
-			yq -M -i 'del(.sniffer.force-domain)' "$RUN_PROFILE_PATH"
+			run_yq -M -i 'del(.sniffer.force-domain)' "$RUN_PROFILE_PATH"
 		fi
 		if [ "$overwrite_sniffer_ignore_domain_name" = 1 ]; then
-			yq -M -i 'del(.sniffer.skip-domain)' "$RUN_PROFILE_PATH"
+			run_yq -M -i 'del(.sniffer.skip-domain)' "$RUN_PROFILE_PATH"
 		fi
 		if [ "$overwrite_sniffer_sniff" = 1 ]; then
-			yq -M -i 'del(.sniffer.sniff)' "$RUN_PROFILE_PATH"
+			run_yq -M -i 'del(.sniffer.sniff)' "$RUN_PROFILE_PATH"
 		fi
 		local subscription_json custom_mixin_json luci_mixin_json merged_json runtime_profile_tmp mixin_error
 		subscription_json="$TEMP_DIR/subscription.json"
@@ -295,7 +299,7 @@ start_service() {
 			"$merged_json" "$runtime_profile_tmp" "$mixin_error"
 
 		# Convert the selected YAML profile/subscription to JSON.
-		if ! yq -M -p yaml -o json '.' "$RUN_PROFILE_PATH" \
+		if ! run_yq -M -p yaml -o json '.' "$RUN_PROFILE_PATH" \
 			> "$subscription_json" 2> "$mixin_error"; then
 			log "Mixin" "Failed to convert the profile to JSON."
 			[ -s "$mixin_error" ] && log "Mixin" "$(head -n 1 "$mixin_error")"
@@ -320,7 +324,7 @@ start_service() {
 			log "App" "Exit."
 			return
 		fi
-		if ! yq -M -p json -o json -e '.' "$luci_mixin_json" \
+		if ! run_yq -M -p json -o json -e '.' "$luci_mixin_json" \
 			>/dev/null 2> "$mixin_error"; then
 			log "Mixin" "Generated LuCI mixin is invalid JSON."
 			[ -s "$mixin_error" ] && log "Mixin" "$(head -n 1 "$mixin_error")"
@@ -330,7 +334,7 @@ start_service() {
 
 		# Convert the optional custom YAML mixin to JSON.
 		if [ "$mixin_file_content" = 1 ]; then
-			if ! yq -M -p yaml -o json '. // {}' "$MIXIN_FILE_PATH" \
+			if ! run_yq -M -p yaml -o json '. // {}' "$MIXIN_FILE_PATH" \
 				> "$custom_mixin_json" 2> "$mixin_error"; then
 				log "Mixin" "Failed to convert the custom mixin to JSON."
 				[ -s "$mixin_error" ] && log "Mixin" "$(head -n 1 "$mixin_error")"
@@ -349,7 +353,7 @@ start_service() {
 
 		# Merge inputs as JSON. Later inputs have higher priority.
 		if [ "$mixin_file_content" = 0 ]; then
-			if ! yq -M -p json -o json eval-all "$merge_expression" \
+			if ! run_yq -M -p json -o json eval-all "$merge_expression" \
 				"$subscription_json" "$luci_mixin_json" \
 				> "$merged_json" 2> "$mixin_error"; then
 				log "Mixin" "Failed to merge the JSON configuration."
@@ -358,7 +362,7 @@ start_service() {
 				return
 			fi
 		elif [ "$mixin_file_content" = 1 ]; then
-			if ! yq -M -p json -o json eval-all "$merge_expression" \
+			if ! run_yq -M -p json -o json eval-all "$merge_expression" \
 				"$subscription_json" "$custom_mixin_json" "$luci_mixin_json" \
 				> "$merged_json" 2> "$mixin_error"; then
 				log "Mixin" "Failed to merge the JSON configuration."
@@ -374,7 +378,7 @@ start_service() {
 		fi
 
 		# Convert the merged JSON back to the existing runtime YAML path.
-		if ! yq -M -p json -o yaml -P '.' "$merged_json" \
+		if ! run_yq -M -p json -o yaml -P '.' "$merged_json" \
 			> "$runtime_profile_tmp" 2> "$mixin_error"; then
 			log "Mixin" "Failed to convert the merged JSON to YAML."
 			[ -s "$mixin_error" ] && log "Mixin" "$(head -n 1 "$mixin_error")"
@@ -392,15 +396,15 @@ start_service() {
 		if [ "$proxy_enabled" = 1 ]; then
 			local tun_mode_active; tun_mode_active=0
 			case "$ipv4_tcp_mode:$ipv4_udp_mode:$ipv6_tcp_mode:$ipv6_udp_mode" in *tun*) tun_mode_active=1 ;; esac
-			if yq -M -e 'has("tun")' "$RUN_PROFILE_PATH" > /dev/null 2>&1; then
+			if run_yq -M -e 'has("tun")' "$RUN_PROFILE_PATH" > /dev/null 2>&1; then
 				if [ "$tun_mode_active" -eq 1 ]; then
-					yq -M -i '(.tun) |= (.enable = true | .auto-route = false | .auto-redirect = false | .auto-detect-interface = false | .disable-icmp-forwarding = true)' "$RUN_PROFILE_PATH"
+					run_yq -M -i '(.tun) |= (.enable = true | .auto-route = false | .auto-redirect = false | .auto-detect-interface = false | .disable-icmp-forwarding = true)' "$RUN_PROFILE_PATH"
 				else
-					yq -M -i '(.tun) |= (.auto-route = false | .auto-redirect = false | .auto-detect-interface = false | .disable-icmp-forwarding = true)' "$RUN_PROFILE_PATH"
+					run_yq -M -i '(.tun) |= (.auto-route = false | .auto-redirect = false | .auto-detect-interface = false | .disable-icmp-forwarding = true)' "$RUN_PROFILE_PATH"
 				fi
 			fi
-			if yq -M -e 'has("listeners")' "$RUN_PROFILE_PATH" > /dev/null 2>&1; then
-				yq -M -i '(.listeners[] | select(.type == "tun")) |= (.auto-route = false | .auto-redirect = false | .auto-detect-interface = false | .disable-icmp-forwarding = true)' "$RUN_PROFILE_PATH"
+			if run_yq -M -e 'has("listeners")' "$RUN_PROFILE_PATH" > /dev/null 2>&1; then
+				run_yq -M -i '(.listeners[] | select(.type == "tun")) |= (.auto-route = false | .auto-redirect = false | .auto-detect-interface = false | .disable-icmp-forwarding = true)' "$RUN_PROFILE_PATH"
 			fi
 		fi
 	fi
@@ -408,7 +412,7 @@ start_service() {
 	if [ "$core_only" = 0 ] && [ "$proxy_enabled" = 1 ]; then
 		log "Profile" "Checking..."
 		if [ "$ipv4_dns_mode" = redirect ]; then
-			if yq -M -e '(has("dns") and (.dns | .enable) and (.dns | has("listen"))) | not' "$RUN_PROFILE_PATH" > /dev/null 2>&1; then
+			if run_yq -M -e '(has("dns") and (.dns | .enable) and (.dns | has("listen"))) | not' "$RUN_PROFILE_PATH" > /dev/null 2>&1; then
 				log "Profile" "Check failed."
 				log "Profile" "IPv4 DNS REDIRECT requires an enabled Mihomo DNS listener."
 				log "App" "Exit."
@@ -416,7 +420,7 @@ start_service() {
 			fi
 		fi
 		if [ "$ipv4_tcp_mode" = redirect ]; then
-			if REDIRECT_LISTENER="$redirect_listener_name" yq -M -e '(has("redir-port") or (has("listeners") and .listeners | any_c(.name == env(REDIRECT_LISTENER) and .type == "redir"))) | not' "$RUN_PROFILE_PATH" > /dev/null 2>&1; then
+			if REDIRECT_LISTENER="$redirect_listener_name" run_yq -M -e '(has("redir-port") or (has("listeners") and .listeners | any_c(.name == env(REDIRECT_LISTENER) and .type == "redir"))) | not' "$RUN_PROFILE_PATH" > /dev/null 2>&1; then
 				log "Profile" "Check failed."
 				log "Profile" "IPv4 TCP REDIRECT requires a Redirect Port/Listener."
 				log "App" "Exit."
@@ -425,7 +429,7 @@ start_service() {
 		fi
 		if [ "$ipv4_tcp_mode" = tproxy ] || [ "$ipv4_udp_mode" = tproxy ] || \
 		   [ "$ipv6_tcp_mode" = tproxy ] || [ "$ipv6_udp_mode" = tproxy ] || [ "$ipv6_dns_mode" = tproxy ]; then
-			if TPROXY_LISTENER="$tproxy_listener_name" yq -M -e '(has("tproxy-port") or (has("listeners") and .listeners | any_c(.name == env(TPROXY_LISTENER) and .type == "tproxy"))) | not' "$RUN_PROFILE_PATH" > /dev/null 2>&1; then
+			if TPROXY_LISTENER="$tproxy_listener_name" run_yq -M -e '(has("tproxy-port") or (has("listeners") and .listeners | any_c(.name == env(TPROXY_LISTENER) and .type == "tproxy"))) | not' "$RUN_PROFILE_PATH" > /dev/null 2>&1; then
 				log "Profile" "Check failed."
 				log "Profile" "Selected TPROXY modes require a TPROXY Port/Listener."
 				log "App" "Exit."
@@ -434,7 +438,7 @@ start_service() {
 		fi
 		case "$ipv4_tcp_mode:$ipv4_udp_mode:$ipv6_tcp_mode:$ipv6_udp_mode" in
 			*tun*)
-				if TUN_LISTENER="$tun_listener_name" yq -M -e '((.tun | select(.enable == true) | .device) // (.listeners[]? | select(.name == env(TUN_LISTENER) and .type == "tun") | .device) // "") == ""' "$RUN_PROFILE_PATH" > /dev/null 2>&1; then
+				if TUN_LISTENER="$tun_listener_name" run_yq -M -e '((.tun | select(.enable == true) | .device) // (.listeners[]? | select(.name == env(TUN_LISTENER) and .type == "tun") | .device) // "") == ""' "$RUN_PROFILE_PATH" > /dev/null 2>&1; then
 					log "Profile" "Check failed."
 					log "Profile" "Selected TUN modes require an enabled TUN device/listener."
 					log "App" "Exit."
@@ -550,7 +554,7 @@ service_started() {
 		case "$tun_timeout" in ''|*[!0-9]*|0) tun_timeout=30 ;; esac
 		case "$tun_interval" in ''|*[!0-9]*|0) tun_interval=1 ;; esac
 		[ "$tun_interval" -le "$tun_timeout" ] || tun_interval="$tun_timeout"
-		tun_device="$(TUN_LISTENER="$tun_listener_name" yq -M -r '(.tun | select(.enable == true) | .device) // (.listeners[]? | select(.name == env(TUN_LISTENER) and .type == "tun") | .device) // ""' "$RUN_PROFILE_PATH" 2>/dev/null)"
+		tun_device="$(TUN_LISTENER="$tun_listener_name" run_yq -M -r '(.tun | select(.enable == true) | .device) // (.listeners[]? | select(.name == env(TUN_LISTENER) and .type == "tun") | .device) // ""' "$RUN_PROFILE_PATH" 2>/dev/null)"
 		[ -n "$tun_device" ] || { log "Routing" "TUN device is not configured."; return 1; }
 		log "Routing" "Waiting for TUN device $tun_device..."
 		local tun_remaining tun_sleep
@@ -639,7 +643,7 @@ cleanup() {
 	config_get tun_rule_pref routing tun_rule_pref 1025
 	config_get tun_route_table routing tun_route_table 81
 	config_get tun_listener_name core tun_listener_name tun-in
-	tun_device="$(TUN_LISTENER="$tun_listener_name" yq -M -r '(.tun | .device) // (.listeners[]? | select(.name == env(TUN_LISTENER) and .type == "tun") | .device) // ""' "$RUN_PROFILE_PATH" 2>/dev/null)"
+	tun_device="$(TUN_LISTENER="$tun_listener_name" run_yq -M -r '(.tun | .device) // (.listeners[]? | select(.name == env(TUN_LISTENER) and .type == "tun") | .device) // ""' "$RUN_PROFILE_PATH" 2>/dev/null)"
 
 	[ -x "$FIREWALL_FW3_SH" ] && "$FIREWALL_FW3_SH" remove >/dev/null 2>&1
 	remove_tproxy_policy_route 4 "$tproxy_fw_mark" "$tproxy_fw_mask" "$tproxy_rule_pref" "$tproxy_route_table"
@@ -753,7 +757,7 @@ update_subscription() {
 		if [ ! -f "$subscription_info_file" ] && grep -q -i "subscription-userinfo:" "$subscription_header_tmpfile"; then
 			subscription_info_file="$subscription_header_tmpfile"
 		fi
-		if yq -M -p yaml -o yaml -e 'has("proxies") or has("proxy-providers")' "$subscription_tmpfile" > /dev/null 2>&1; then
+		if run_yq -M -p yaml -o yaml -e 'has("proxies") or has("proxy-providers")' "$subscription_tmpfile" > /dev/null 2>&1; then
 			log "Profile" "Subscription is valid."
 			success=1
 		else
