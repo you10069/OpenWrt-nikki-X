@@ -201,7 +201,7 @@ return view.extend({
 
         let m, s, o;
 
-        m = new form.Map('nikki', _('Nikki'), `${_('Transparent Proxy with Mihomo on OpenWrt.')} <a href="https://github.com/nikkinikki-org/OpenWrt-nikki/wiki" target="_blank">${_('How To Use')}</a>`);
+        m = new form.Map('nikki', _('Nikki-X'), `${_('Transparent Proxy with Mihomo on OpenWrt.')} <a href="https://github.com/nikkinikki-org/OpenWrt-nikki/wiki" target="_blank">${_('How To Use')}</a>`);
 
         s = m.section(form.TableSection, 'status', _('Status'));
         s.anonymous = true;
