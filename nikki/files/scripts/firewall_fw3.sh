@@ -98,24 +98,24 @@ load_runtime_endpoints() {
 	config_get tun_listener core tun_listener_name tun-in
 
 	if mode_is "$IPV4_TCP_MODE" redirect; then
-		REDIR_PORT="$(REDIRECT_LISTENER="$redirect_listener" yq -M -r '."redir-port" // (.listeners[]? | select(.name == env(REDIRECT_LISTENER) and .type == "redir") | .port) // ""' "$RUN_PROFILE_PATH" 2>/dev/null)"
+		REDIR_PORT="$(REDIRECT_LISTENER="$redirect_listener" yq -M -r '."redir-port" // (.listeners[]? | select(.name == env(REDIRECT_LISTENER) and .type == "redir") | .port) // ""' "$RUN_PROFILE_PATH" </dev/null 2>/dev/null)"
 		valid_port "$REDIR_PORT" || return 1
 	fi
 
 	if [ "$TPROXY_ACTIVE_V4" -eq 1 ] || [ "$TPROXY_ACTIVE_V6" -eq 1 ]; then
-		TPROXY_PORT="$(TPROXY_LISTENER="$tproxy_listener" yq -M -r '."tproxy-port" // (.listeners[]? | select(.name == env(TPROXY_LISTENER) and .type == "tproxy") | .port) // ""' "$RUN_PROFILE_PATH" 2>/dev/null)"
+		TPROXY_PORT="$(TPROXY_LISTENER="$tproxy_listener" yq -M -r '."tproxy-port" // (.listeners[]? | select(.name == env(TPROXY_LISTENER) and .type == "tproxy") | .port) // ""' "$RUN_PROFILE_PATH" </dev/null 2>/dev/null)"
 		valid_port "$TPROXY_PORT" || return 1
 	fi
 
 	if mode_is "$IPV4_DNS_MODE" redirect; then
-		dns_listen="$(yq -M -r '.dns.listen // ""' "$RUN_PROFILE_PATH" 2>/dev/null)"
+		dns_listen="$(yq -M -r '.dns.listen // ""' "$RUN_PROFILE_PATH" </dev/null 2>/dev/null)"
 		DNS_LISTEN="$dns_listen"
 		DNS_PORT="$(extract_listen_port "$dns_listen")"
 		valid_port "$DNS_PORT" || return 1
 	fi
 
 	if [ "$TUN_ACTIVE_V4" -eq 1 ] || [ "$TUN_ACTIVE_V6" -eq 1 ]; then
-		TUN_DEVICE="$(TUN_LISTENER="$tun_listener" yq -M -r '(.tun | select(.enable == true) | .device) // (.listeners[]? | select(.name == env(TUN_LISTENER) and .type == "tun") | .device) // ""' "$RUN_PROFILE_PATH" 2>/dev/null)"
+		TUN_DEVICE="$(TUN_LISTENER="$tun_listener" yq -M -r '(.tun | select(.enable == true) | .device) // (.listeners[]? | select(.name == env(TUN_LISTENER) and .type == "tun") | .device) // ""' "$RUN_PROFILE_PATH" </dev/null 2>/dev/null)"
 		[ -n "$TUN_DEVICE" ] || return 1
 		case "$TUN_DEVICE" in *[!A-Za-z0-9_.:-]*) return 1 ;; esac
 	fi
