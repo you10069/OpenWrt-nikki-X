@@ -1,7 +1,7 @@
 include $(TOPDIR)/rules.mk
 
 PKG_NAME:=nikki
-PKG_VERSION:=2026.07.17.legacy5.3
+PKG_VERSION:=2026.07.18-v6
 PKG_RELEASE:=1
 PKGARCH:=all
 
