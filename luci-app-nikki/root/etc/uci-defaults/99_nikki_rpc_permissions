@@ -1,0 +1,7 @@
+#!/bin/sh
+
+# Runtime fallback for repositories uploaded from filesystems that do not
+# preserve Unix executable bits. LuCI's package postinst sources this file.
+[ ! -e /usr/libexec/nikki-rpc ] || chmod 0755 /usr/libexec/nikki-rpc
+
+exit 0
