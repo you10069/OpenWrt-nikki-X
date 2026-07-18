@@ -1392,7 +1392,7 @@ def test_static() -> None:
     assert "PKG_VERSION:=2026.07.17.legacy5.3" in makefile
     luci_makefile = (ROOT / "luci-app-nikki/Makefile").read_text()
     assert "PKG_VERSION:=1.26.1.legacy5.3" in luci_makefile
-    assert "PKG_RELEASE:=3" in luci_makefile
+    assert "PKG_RELEASE:=4" in luci_makefile
     assert "Hooks/Prepare/Post += Prepare/SetNikkiRpcExecutable" in luci_makefile
     assert "chmod 0755 $(PKG_BUILD_DIR)/root/usr/libexec/nikki-rpc" in luci_makefile
     permission_fallback = (
@@ -1411,7 +1411,7 @@ def test_static() -> None:
         assert label in status_block
     for moved_label in (
         "Device Architecture", "Current Version", "Update Version",
-        "Update Source", "Update File", "Update Address", "Update Status",
+        "Update Source", "Update File", "Update Address", "Save Changes", "Update Status",
         "Check Update", "Update Core", "Saved Previous Version",
         "Rollback to Previous Version", "Delete Previous Version Now",
     ):
@@ -1422,7 +1422,7 @@ def test_static() -> None:
     core_block = app_js[core_start:core_end]
     ordered_labels = (
         "Device Architecture", "Current Version", "Update Version",
-        "Update Source", "Update File", "Update Address", "Update Status",
+        "Update Source", "Update File", "Update Address", "Save Changes", "Update Status",
         "Check Update", "Update Core", "Saved Previous Version",
         "Rollback to Previous Version", "Delete Previous Version Now",
     )
@@ -1431,6 +1431,12 @@ def test_static() -> None:
     assert "coreInfo.resolved_asset" in core_block
     assert "coreInfo.resolved_url" in core_block
     assert "coreInfo.previous_version" in core_block
+    assert "MetaCubeX Official Latest Version" in core_block
+    assert "persistCoreUpdateConfig(coreUpdateSection)" in core_block
+    assert "Configuration changed. Save changes or check for updates again." in app_js
+    assert "Configuration saved. Check for updates again." in app_js
+    assert "section.parse()" in app_js
+    assert "uci.apply()" in app_js
 
     test_frontend_backend_contracts()
     shell_files = list(ROOT.rglob("*.sh")) + list(ROOT.rglob("*.init"))

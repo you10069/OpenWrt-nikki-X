@@ -1234,7 +1234,7 @@ msgstr ""
 msgid "Source Type"
 msgstr ""
 
-msgid "Official MetaCubeX Releases"
+msgid "MetaCubeX Official Latest Version"
 msgstr ""
 
 msgid "Custom ShellCrash-Compatible Repository"
@@ -1340,4 +1340,16 @@ msgid "Rollback to Previous Version"
 msgstr ""
 
 msgid "Delete Previous Version Now"
+msgstr ""
+
+msgid "Save Changes"
+msgstr ""
+
+msgid "Configuration changed. Save changes or check for updates again."
+msgstr ""
+
+msgid "Configuration saved. Check for updates again."
+msgstr ""
+
+msgid "Core update configuration saved."
 msgstr ""

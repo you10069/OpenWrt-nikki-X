@@ -1241,8 +1241,8 @@ msgstr "Mihomo 内核更新"
 msgid "Source Type"
 msgstr "更新源类型"
 
-msgid "Official MetaCubeX Releases"
-msgstr "MetaCubeX 官方 Releases"
+msgid "MetaCubeX Official Latest Version"
+msgstr "MetaCubeX 官方 最新版本"
 
 msgid "Custom ShellCrash-Compatible Repository"
 msgstr "自定义 ShellCrash 兼容仓库"
@@ -1348,3 +1348,15 @@ msgstr "回退到上个版本"
 
 msgid "Delete Previous Version Now"
 msgstr "立即删除上个版本"
+
+msgid "Save Changes"
+msgstr "保存修改"
+
+msgid "Configuration changed. Save changes or check for updates again."
+msgstr "配置已修改，请保存修改或重新检查更新"
+
+msgid "Configuration saved. Check for updates again."
+msgstr "配置已保存，请重新检查更新"
+
+msgid "Core update configuration saved."
+msgstr "内核更新配置已保存。"
