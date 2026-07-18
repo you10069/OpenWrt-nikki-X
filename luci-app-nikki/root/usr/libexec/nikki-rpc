@@ -11,6 +11,7 @@ TMP_DIR="/var/run/nikki"
 DEBUG_LOG="/var/log/nikki/debug.log"
 CORE_UPDATER="/etc/nikki/scripts/core_update.sh"
 CORE_ACTIVE="/usr/libexec/nikki/mihomo"
+CORE_STATE="$HOME_DIR/core-update.state"
 
 json_success() {
 	json_init
@@ -49,9 +50,7 @@ version() {
 	if command -v opkg >/dev/null 2>&1; then
 		app="$(opkg list-installed luci-app-nikki 2>/dev/null | awk '{print $3; exit}')"
 	fi
-	if [ -x "$CORE_ACTIVE" ]; then
-		core="$("$CORE_ACTIVE" -v 2>/dev/null | sed -n 's/.*\(v[0-9][0-9A-Za-z._+-]*\).*/\1/p' | head -n 1)"
-	fi
+	[ -r "$CORE_STATE" ] && core="$(sed -n 's/^current_version=//p' "$CORE_STATE" | tail -n 1)"
 	json_init
 	json_add_string app "$app"
 	json_add_string core "$core"

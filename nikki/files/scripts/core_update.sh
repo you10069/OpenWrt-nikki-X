@@ -148,6 +148,54 @@ core_version() {
 	printf '%s' "$version"
 }
 
+core_identity() {
+	local path="$1" identity
+	[ -e "$path" ] || return 0
+	if command -v stat >/dev/null 2>&1; then
+		identity="$(stat -c '%s:%Y' "$path" 2>/dev/null)"
+	fi
+	[ -n "$identity" ] || identity="$(wc -c < "$path" 2>/dev/null)"
+	printf '%s' "$identity"
+}
+
+clear_core_version_cache() {
+	local slot="$1"
+	state_set "${slot}_version" '' >/dev/null 2>&1 || :
+	state_set "${slot}_identity" '' >/dev/null 2>&1 || :
+}
+
+cache_core_version() {
+	local slot="$1" path="$2" version="$3" identity
+	[ -n "$version" ] || { clear_core_version_cache "$slot"; return 0; }
+	identity="$(core_identity "$path")"
+	state_set "${slot}_version" "$version" >/dev/null 2>&1 || :
+	state_set "${slot}_identity" "$identity" >/dev/null 2>&1 || :
+}
+
+cached_core_version() {
+	local slot="$1" path="$2" identity cached_identity version
+	if [ ! -x "$path" ]; then
+		[ -n "$(state_get "${slot}_version")$(state_get "${slot}_identity")" ] && clear_core_version_cache "$slot"
+		return 0
+	fi
+
+	identity="$(core_identity "$path")"
+	cached_identity="$(state_get "${slot}_identity")"
+	version="$(state_get "${slot}_version")"
+	if [ -n "$version" ] && [ -n "$identity" ] && [ "$cached_identity" = "$identity" ]; then
+		printf '%s' "$version"
+		return 0
+	fi
+
+	version="$(core_version "$path")"
+	if [ -n "$version" ]; then
+		cache_core_version "$slot" "$path" "$version"
+	else
+		clear_core_version_cache "$slot"
+	fi
+	printf '%s' "$version"
+}
+
 package_architecture() {
 	local arch
 	arch=
@@ -635,10 +683,15 @@ install_candidate() {
 }
 
 update_core() {
-	local archive candidate candidate_version installed_version rc tmp_required
+	local archive candidate candidate_version installed_version previous_version active_existed rc tmp_required
 	acquire_lock || return 1
 	load_config
 	ensure_active_core || { fail "无法准备内核目录"; return 1; }
+	active_existed=0
+	if [ -x "$CORE_ACTIVE" ]; then
+		active_existed=1
+		previous_version="$(cached_core_version current "$CORE_ACTIVE")"
+	fi
 	check_minimum_space "$TEMP_ROOT" "$MIN_FREE_KB" || { fail "空间不足，自行释放空间后重试"; return 1; }
 	set_status updating ''
 	archive="$TEMP_ROOT/nikki-core-download.$$"
@@ -658,7 +711,12 @@ update_core() {
 		2) fail "空间不足，自行释放空间后重试"; return 1 ;;
 		*) fail "新内核安装或服务重启失败，已保留原核心"; return 1 ;;
 	esac
-	installed_version="$(core_version "$CORE_ACTIVE")"
+	installed_version="$candidate_version"
+	cache_core_version current "$CORE_ACTIVE" "$installed_version"
+	if [ "$active_existed" -eq 1 ] && [ -x "$CORE_PREVIOUS" ]; then
+		[ -n "$previous_version" ] || previous_version="$(core_version "$CORE_PREVIOUS")"
+		cache_core_version previous "$CORE_PREVIOUS" "$previous_version"
+	fi
 	state_set latest_version "$candidate_version"
 	state_set installed_version "$installed_version"
 	set_status success ''
@@ -682,12 +740,14 @@ replace_core_slot() {
 }
 
 rollback_core() {
-	local was_running active_backup previous_backup active_new previous_new restore_active restore_previous
+	local was_running current_version previous_version active_backup previous_backup active_new previous_new restore_active restore_previous
 	acquire_lock || return 1
 	ensure_active_core || { fail "无法准备内核目录"; return 1; }
 	[ -x "$CORE_ACTIVE" ] || { fail "当前核心不存在"; return 1; }
 	[ -x "$CORE_PREVIOUS" ] || { fail "没有可回退的上一版本"; return 1; }
-	[ -n "$(core_version "$CORE_PREVIOUS")" ] || { fail "上一版本核心不可执行"; return 1; }
+	current_version="$(cached_core_version current "$CORE_ACTIVE")"
+	previous_version="$(cached_core_version previous "$CORE_PREVIOUS")"
+	[ -n "$previous_version" ] || { fail "上一版本核心不可执行"; return 1; }
 
 	was_running=0; service_running && was_running=1
 	active_backup="$CORE_DIR/.mihomo.rollback.active.$$"
@@ -724,13 +784,16 @@ rollback_core() {
 	fi
 
 	rm -f "$active_backup" "$previous_backup" "$active_new" "$previous_new" "$restore_active" "$restore_previous"
+	cache_core_version current "$CORE_ACTIVE" "$previous_version"
+	cache_core_version previous "$CORE_PREVIOUS" "$current_version"
 	set_status rolled_back ''
-	printf '%s\n' "$(core_version "$CORE_ACTIVE")"
+	printf '%s\n' "$previous_version"
 }
 
 delete_previous() {
 	acquire_lock || return 1
 	rm -f "$CORE_PREVIOUS" || { fail "删除上一版本失败"; return 1; }
+	clear_core_version_cache previous
 	set_status previous_deleted ''
 }
 
@@ -740,8 +803,8 @@ print_status() {
 	ensure_active_core >/dev/null 2>&1 || :
 	package="$(package_architecture)"
 	uname_arch="$("$UNAME_BIN" -m 2>/dev/null)"
-	active="$(core_version "$CORE_ACTIVE")"
-	previous="$(core_version "$CORE_PREVIOUS")"
+	active="$(cached_core_version current "$CORE_ACTIVE")"
+	previous="$(cached_core_version previous "$CORE_PREVIOUS")"
 	latest="$(state_get latest_version)"
 	source="$(state_get source)"; [ -n "$source" ] || source="$(source_label)"
 	status="$(state_get last_status)"; [ -n "$status" ] || status=idle
