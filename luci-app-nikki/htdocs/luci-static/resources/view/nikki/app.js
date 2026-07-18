@@ -237,7 +237,7 @@ return view.extend({
 
         let m, s, o;
 
-        m = new form.Map('nikki', _('Nikki'));
+        m = new form.Map('nikki', _('Nikki-X'));
 
         s = m.section(form.TableSection, 'status', _('Status'));
         s.anonymous = true;
