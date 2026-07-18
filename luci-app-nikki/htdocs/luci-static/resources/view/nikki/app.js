@@ -200,15 +200,20 @@ function runCoreAction(action, event, successMessage, beforeAction) {
     });
 }
 
-function actionButton(title, style, action, enabled, successMessage, beforeAction) {
-    return E('button', {
+function actionButton(title, style, action, enabled, successMessage, beforeAction, elementId) {
+    const attributes = {
         class: `cbi-button cbi-button-${style} nikki-core-update-button`,
         disabled: enabled ? null : '',
         click: function (event) {
             event.preventDefault();
             return runCoreAction(action, event, successMessage, beforeAction);
         }
-    }, [title]);
+    };
+
+    if (elementId)
+        attributes.id = elementId;
+
+    return E('button', attributes, [title]);
 }
 
 function saveButton(section) {
@@ -251,12 +256,54 @@ function trackCoreUpdateChanges(root) {
     root._nikkiCoreUpdateTracking = true;
 }
 
+function updateCoreInfoValue(root, elementId, value) {
+    const element = root.querySelector(`#${elementId}`);
+    if (element)
+        element.textContent = textOrDash(value);
+}
+
+function updateCoreInfoButton(root, elementId, enabled) {
+    const element = root.querySelector(`#${elementId}`);
+    if (element)
+        element.disabled = !enabled;
+}
+
+function updateCoreInfo(root, info) {
+    info = info || {};
+
+    const architecture = [info.architecture_uname, info.architecture_package]
+        .filter(Boolean)
+        .join(' / ');
+
+    updateCoreInfoValue(root, 'core_update_architecture', architecture);
+    updateCoreInfoValue(root, 'core_update_current_version', info.current_version);
+    updateCoreInfoValue(root, 'core_update_latest_version', info.latest_version);
+
+    if (!coreUpdateSourceNotice)
+        updateCoreInfoValue(root, 'core_update_source', info.source);
+
+    updateCoreInfoValue(root, 'core_update_file', info.resolved_asset);
+    updateCoreInfoValue(root, 'core_update_address', info.resolved_url);
+    updateCoreInfoValue(root, 'core_update_status', coreStatusText(info));
+    updateCoreInfoValue(root, 'core_update_previous_version', info.previous_version);
+    updateCoreInfoButton(root, 'core_update_rollback_button', !!info.previous_version);
+    updateCoreInfoButton(root, 'core_update_delete_button', !!info.previous_version);
+}
+
+function loadCoreInfo(root) {
+    return L.resolveDefault(nikki.coreStatus(), {
+        status: 'error',
+        error: _('Core operation failed')
+    }).then(function (info) {
+        updateCoreInfo(root, info);
+    });
+}
+
 return view.extend({
     load: function () {
         return Promise.all([
             uci.load('nikki'),
             nikki.version(),
-            nikki.coreStatus(),
             nikki.status(),
             nikki.listProfiles()
         ]);
@@ -265,10 +312,9 @@ return view.extend({
         const subscriptions = uci.sections('nikki', 'subscription');
         const appVersion = data[1].app ?? '';
         const coreVersion = data[1].core ?? '';
-        const coreInfo = data[2] || {};
-        const running = data[3];
-        const profiles = data[4];
-        const architecture = [coreInfo.architecture_uname, coreInfo.architecture_package].filter(Boolean).join(' / ');
+        const coreInfo = {};
+        const running = data[2];
+        const profiles = data[3];
 
         coreUpdateSourceNotice = null;
         coreUpdateDirty = false;
@@ -421,13 +467,13 @@ return view.extend({
 
 
         o = s.option(form.DummyValue, '_device_architecture', _('Device Architecture'));
-        o.cfgvalue = function () { return renderInfoValue(architecture); };
+        o.cfgvalue = function () { return renderInfoValue(null, false, 'core_update_architecture'); };
 
         o = s.option(form.DummyValue, '_current_version', _('Current Version'));
-        o.cfgvalue = function () { return renderInfoValue(coreInfo.current_version); };
+        o.cfgvalue = function () { return renderInfoValue(coreInfo.current_version, false, 'core_update_current_version'); };
 
         o = s.option(form.DummyValue, '_update_version', _('Update Version'));
-        o.cfgvalue = function () { return renderInfoValue(coreInfo.latest_version); };
+        o.cfgvalue = function () { return renderInfoValue(coreInfo.latest_version, false, 'core_update_latest_version'); };
 
         o = s.option(form.DummyValue, '_update_source', _('Update Source'));
         o.cfgvalue = function () {
@@ -435,13 +481,13 @@ return view.extend({
         };
 
         o = s.option(form.DummyValue, '_update_file', _('Update File'));
-        o.cfgvalue = function () { return renderInfoValue(coreInfo.resolved_asset, true); };
+        o.cfgvalue = function () { return renderInfoValue(coreInfo.resolved_asset, true, 'core_update_file'); };
 
         o = s.option(form.DummyValue, '_update_address', _('Update Address'));
-        o.cfgvalue = function () { return renderInfoValue(coreInfo.resolved_url, true); };
+        o.cfgvalue = function () { return renderInfoValue(coreInfo.resolved_url, true, 'core_update_address'); };
 
         o = s.option(form.DummyValue, '_update_status', _('Update Status'));
-        o.cfgvalue = function () { return renderInfoValue(coreStatusText(coreInfo), true); };
+        o.cfgvalue = function () { return renderInfoValue(coreStatusText(coreInfo), true, 'core_update_status'); };
 
         o = s.option(form.DummyValue, '_check_update', _('Check Update'));
         o.cfgvalue = function () {
@@ -468,16 +514,32 @@ return view.extend({
         };
 
         o = s.option(form.DummyValue, '_saved_previous_version', _('Saved Previous Version'));
-        o.cfgvalue = function () { return renderInfoValue(coreInfo.previous_version); };
+        o.cfgvalue = function () { return renderInfoValue(coreInfo.previous_version, false, 'core_update_previous_version'); };
 
         o = s.option(form.DummyValue, '_rollback_previous', _('Rollback to Previous Version'));
         o.cfgvalue = function () {
-            return actionButton(_('Rollback to Previous Version'), 'action', 'rollback', !!coreInfo.previous_version, _('Core rollback completed.'));
+            return actionButton(
+                _('Rollback to Previous Version'),
+                'action',
+                'rollback',
+                !!coreInfo.previous_version,
+                _('Core rollback completed.'),
+                null,
+                'core_update_rollback_button'
+            );
         };
 
         o = s.option(form.DummyValue, '_delete_previous', _('Delete Previous Version Now'));
         o.cfgvalue = function () {
-            return actionButton(_('Delete Previous Version Now'), 'negative', 'delete-previous', !!coreInfo.previous_version, _('Previous core deleted.'));
+            return actionButton(
+                _('Delete Previous Version Now'),
+                'negative',
+                'delete-previous',
+                !!coreInfo.previous_version,
+                _('Previous core deleted.'),
+                null,
+                'core_update_delete_button'
+            );
         };
 
         s = m.section(form.NamedSection, 'procd', 'procd', _('procd Config'));
@@ -565,6 +627,9 @@ return view.extend({
                 root.insertBefore(notice, root.firstChild);
 
             trackCoreUpdateChanges(root);
+            window.setTimeout(function () {
+                loadCoreInfo(root);
+            }, 0);
             return root;
         });
     },
