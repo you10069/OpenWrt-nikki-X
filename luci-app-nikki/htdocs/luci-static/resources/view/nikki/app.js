@@ -2,12 +2,22 @@
 'require form';
 'require view';
 'require uci';
+'require rpc';
 'require poll';
 'require ui';
 'require tools.nikki as nikki';
 
 let coreUpdateSourceNotice = null;
 let coreUpdateDirty = false;
+let coreUpdateBusy = false;
+let coreUpdateLockedButtons = [];
+
+const callUciCommit = rpc.declare({
+    object: 'uci',
+    method: 'commit',
+    params: ['config'],
+    reject: true
+});
 
 const coreUpdateConfigOptions = [
     'source_type',
@@ -105,66 +115,94 @@ function markCoreUpdateSaved() {
     updateSourceNotice(coreUpdateSourceNotice);
 }
 
+function setCoreUpdateBusy(busy) {
+    coreUpdateBusy = busy;
+
+    if (busy) {
+        coreUpdateLockedButtons = Array.prototype.map.call(
+            document.querySelectorAll('.nikki-core-update-button, .cbi-page-actions button'),
+            function (button) {
+                const state = { button: button, disabled: button.disabled };
+                button.disabled = true;
+                return state;
+            }
+        );
+        return;
+    }
+
+    coreUpdateLockedButtons.forEach(function (state) {
+        if (state.button?.isConnected)
+            state.button.disabled = state.disabled;
+    });
+    coreUpdateLockedButtons = [];
+}
+
+function runExclusiveCoreUpdate(task) {
+    if (coreUpdateBusy)
+        return Promise.reject(new Error(_('Core operation failed')));
+
+    setCoreUpdateBusy(true);
+    return Promise.resolve().then(task).then(function (result) {
+        setCoreUpdateBusy(false);
+        return result;
+    }, function (error) {
+        setCoreUpdateBusy(false);
+        throw error;
+    });
+}
+
 function persistCoreUpdateConfig(section) {
     section.map.checkDepends();
     return section.parse()
         .then(function () { return uci.save(); })
         .then(function (changedConfigs) {
-            // rpcd on OpenWrt 21.02 returns UBUS_STATUS_NO_DATA when
-            // uci.apply is called without any pending session changes.
-            // Skip apply in that case so repeated checks and updates can
-            // continue even when the form already matches the saved config.
-            if (!Array.isArray(changedConfigs) || changedConfigs.length === 0)
+            // Commit only the Nikki package directly. On OpenWrt 21.02,
+            // uci.apply() starts a rollback-protected transaction and resolves
+            // before its delayed confirmation completes. A second Save/Check
+            // during that window is rejected by rpcd as a configuration
+            // conflict. The core updater fields do not alter connectivity, so
+            // a package-scoped commit is both sufficient and race-free.
+            if (!Array.isArray(changedConfigs) || changedConfigs.indexOf('nikki') === -1)
                 return false;
 
-            return uci.apply().then(function () { return true; });
+            return callUciCommit('nikki').then(function () { return true; });
         })
-        .then(function (applied) {
+        .then(function (committed) {
             markCoreUpdateSaved();
-            return applied;
+            return committed;
         });
 }
 
-function saveCoreUpdateConfig(section, event) {
-    const button = event?.currentTarget;
-    if (button)
-        button.disabled = true;
-
-    return persistCoreUpdateConfig(section).then(function () {
-        if (button)
-            button.disabled = false;
+function saveCoreUpdateConfig(section) {
+    return runExclusiveCoreUpdate(function () {
+        return persistCoreUpdateConfig(section);
+    }).then(function () {
         ui.addNotification(null, E('p', {}, [_('Core update configuration saved.')]));
     }).catch(function (error) {
-        if (button)
-            button.disabled = false;
         ui.addNotification(null, E('p', {}, [error.message || String(error)]), 'danger');
     });
 }
 
 function runCoreAction(action, event, successMessage, beforeAction) {
-    const button = event?.currentTarget;
-    if (button)
-        button.disabled = true;
+    return runExclusiveCoreUpdate(function () {
+        const preparation = beforeAction ? beforeAction() : Promise.resolve();
 
-    const preparation = beforeAction ? beforeAction() : Promise.resolve();
-
-    return preparation.then(function () {
-        return nikki.coreAction(action);
-    }).then(function (result) {
-        if (!result?.success)
-            throw new Error(result?.error_message || result?.error || _('Core operation failed'));
-        ui.addNotification(null, E('p', {}, [successMessage]));
-        window.setTimeout(function () { window.location.reload(); }, 250);
+        return preparation.then(function () {
+            return nikki.coreAction(action);
+        }).then(function (result) {
+            if (!result?.success)
+                throw new Error(result?.error_message || result?.error || _('Core operation failed'));
+            ui.addNotification(null, E('p', {}, [successMessage]));
+            window.setTimeout(function () { window.location.reload(); }, 250);
+        });
     }).catch(function (error) {
-        if (button)
-            button.disabled = false;
         ui.addNotification(null, E('p', {}, [error.message || String(error)]), 'danger');
     });
 }
 
 function actionButton(title, style, action, enabled, successMessage, beforeAction) {
     return E('button', {
-        class: `cbi-button cbi-button-${style}`,
+        class: `cbi-button cbi-button-${style} nikki-core-update-button`,
         disabled: enabled ? null : '',
         click: function (event) {
             event.preventDefault();
@@ -175,7 +213,7 @@ function actionButton(title, style, action, enabled, successMessage, beforeActio
 
 function saveButton(section) {
     return E('button', {
-        class: 'cbi-button cbi-button-save',
+        class: 'cbi-button cbi-button-save nikki-core-update-button',
         click: function (event) {
             event.preventDefault();
             return saveCoreUpdateConfig(section, event);
@@ -532,7 +570,23 @@ return view.extend({
     },
     handleSave: function (event) {
         const updateWasDirty = coreUpdateDirty;
-        return this.super('handleSave', [event]).then(function (result) {
+        const self = this;
+        return runExclusiveCoreUpdate(function () {
+            return self.super('handleSave', [event]);
+        }).then(function (result) {
+            if (updateWasDirty)
+                markCoreUpdateSaved();
+            return result;
+        });
+    },
+    handleSaveApply: function (event, mode) {
+        const updateWasDirty = coreUpdateDirty;
+        const self = this;
+        return runExclusiveCoreUpdate(function () {
+            return self.super('handleSave', [event]).then(function () {
+                return ui.changes.apply(mode === '0');
+            });
+        }).then(function (result) {
             if (updateWasDirty)
                 markCoreUpdateSaved();
             return result;
