@@ -105,13 +105,13 @@ profile() {
 	[ -r "$RUN_PROFILE" ] || { printf '{}\n'; return 0; }
 	trap 'rm -f "$defaults_file"' EXIT INT TERM
 	printf '%s' "$defaults" > "$defaults_file"
-	if ! yq -M -p json -o json -e '.' "$defaults_file" >/dev/null 2>&1; then
+	if ! yq -M -p json -o json -e '.' "$defaults_file" </dev/null >/dev/null 2>&1; then
 		printf '{}\n'
 		rm -f "$defaults_file"
 		trap - EXIT INT TERM
 		return 0
 	fi
-	yq -M -p yaml -o json eval-all 'select(fi == 0) *? select(fi == 1)' "$defaults_file" "$RUN_PROFILE" 2>/dev/null || printf '{}\n'
+	yq -M -p yaml -o json eval-all 'select(fi == 0) *? select(fi == 1)' "$defaults_file" "$RUN_PROFILE" </dev/null 2>/dev/null || printf '{}\n'
 	rm -f "$defaults_file"
 	trap - EXIT INT TERM
 }
