@@ -250,6 +250,11 @@ mixin_dns_listen=$(uci -q get nikki.mixin.dns_listen)
 [ -n "$mixin_dns_listen" ] || uci set nikki.mixin.dns_listen='[::]:1053'
 [ "$mixin_dns_listen" = '0.0.0.0:1053' ] && uci set nikki.mixin.dns_listen='[::]:1053'
 
+# Updated defaults. Only fill missing fields; never overwrite explicit
+# user choices from an existing configuration.
+[ -n "$(uci -q get nikki.mixin.tun_enabled)" ] || uci set nikki.mixin.tun_enabled=1
+[ -n "$(uci -q get nikki.mixin.tun_stack)" ] || uci set nikki.mixin.tun_stack=gvisor
+
 # Nikki Legacy v4: independent per-family/per-protocol modes and TUN routing.
 legacy_ipv4_tcp_mode=$(uci -q get nikki.proxy.ipv4_tcp_mode)
 if [ -z "$legacy_ipv4_tcp_mode" ]; then
@@ -268,9 +273,10 @@ if [ -z "$legacy_ipv4_tcp_mode" ]; then
 	[ "$old_ipv6_dns" = 1 ] && uci set nikki.proxy.ipv6_dns_mode=redirect || uci set nikki.proxy.ipv6_dns_mode=disable
 fi
 
-[ -n "$(uci -q get nikki.proxy.ipv4_udp_mode)" ] || uci set nikki.proxy.ipv4_udp_mode=tproxy
+[ -n "$(uci -q get nikki.proxy.ipv4_tcp_mode)" ] || uci set nikki.proxy.ipv4_tcp_mode=redirect
+[ -n "$(uci -q get nikki.proxy.ipv4_udp_mode)" ] || uci set nikki.proxy.ipv4_udp_mode=tun
 [ -n "$(uci -q get nikki.proxy.ipv6_tcp_mode)" ] || uci set nikki.proxy.ipv6_tcp_mode=redirect
-[ -n "$(uci -q get nikki.proxy.ipv6_udp_mode)" ] || uci set nikki.proxy.ipv6_udp_mode=tproxy
+[ -n "$(uci -q get nikki.proxy.ipv6_udp_mode)" ] || uci set nikki.proxy.ipv6_udp_mode=tun
 [ -n "$(uci -q get nikki.proxy.ipv4_dns_mode)" ] || uci set nikki.proxy.ipv4_dns_mode=redirect
 [ -n "$(uci -q get nikki.proxy.ipv6_dns_mode)" ] || uci set nikki.proxy.ipv6_dns_mode=redirect
 [ -n "$(uci -q get nikki.proxy.tun_timeout)" ] || uci set nikki.proxy.tun_timeout=30

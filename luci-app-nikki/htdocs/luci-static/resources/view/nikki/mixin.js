@@ -188,6 +188,7 @@ return view.extend({
 
         o = s.taboption('tun', form.ListValue, 'tun_enabled', _('Enable'));
         o.optional = true;
+        o.default = '1';
         o.placeholder = _('Unmodified');
         o.value('0', _('Disable'));
         o.value('1', _('Enable'));
@@ -197,6 +198,7 @@ return view.extend({
 
         o = s.taboption('tun', form.ListValue, 'tun_stack', _('Stack'));
         o.optional = true;
+        o.default = 'gvisor';
         o.placeholder = _('Unmodified');
         o.value('system', 'System');
         o.value('gvisor', 'gVisor');

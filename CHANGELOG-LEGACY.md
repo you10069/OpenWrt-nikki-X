@@ -1,3 +1,11 @@
+## 2026-07-20 · Default proxy and TUN profile refresh (nikki r6 / luci r5)
+
+- Changed new-install proxy defaults to REDIRECT for IPv4/IPv6 TCP, TUN for IPv4/IPv6 UDP, and REDIRECT for IPv4/IPv6 DNS.
+- Renamed both DNS REDIRECT choices to `REDIRECT DNS LISTEN` and removed their explanatory descriptions.
+- Enabled the mixin TUN section by default and changed its default stack to gVisor.
+- Added LuCI defaults for the same values and migration fallbacks that only fill missing fields without overwriting explicit user choices.
+- Bumped the nikki package release to r6 and luci-app-nikki to r5.
+
 ## 2026-07-20 · Official download channels and source labels (nikki r5 / luci r4)
 
 - Added an official MetaCubeX download-source selector with automatic HTTPS fallback, PROXY acceleration, PROXYNET acceleration and GitHub direct-link modes.

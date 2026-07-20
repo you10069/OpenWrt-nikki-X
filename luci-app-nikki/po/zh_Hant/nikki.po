@@ -1144,20 +1144,14 @@ msgstr "IPv4 DNS 模式"
 msgid "IPv6 DNS Mode"
 msgstr "IPv6 DNS 模式"
 
-msgid "REDIRECT to Mihomo DNS"
-msgstr "重新導向至 Mihomo DNS"
+msgid "REDIRECT DNS LISTEN"
+msgstr "REDIRECT DNS LISTEN"
 
 msgid "TUN Device Timeout"
 msgstr "TUN 裝置等待逾時"
 
 msgid "TUN Device Check Interval"
 msgstr "TUN 裝置檢查間隔"
-
-msgid "REDIRECT TCP/UDP port 53 to the Mihomo DNS listener, TPROXY it to the Mihomo TPROXY listener, or route it through TUN while preserving the original destination."
-msgstr "將 TCP/UDP 53 連接埠 REDIRECT 至 Mihomo DNS 監聽連接埠、TPROXY 至 Mihomo TPROXY 監聽連接埠，或在保留原始目標位址的情況下透過 TUN 路由。"
-
-msgid "REDIRECT TCP/UDP port 53 to the dual-stack Mihomo DNS listener, TPROXY it to the Mihomo TPROXY listener, or route it through TUN while preserving the original destination."
-msgstr "將 TCP/UDP 53 連接埠 REDIRECT 至雙棧 Mihomo DNS 監聽連接埠、TPROXY 至 Mihomo TPROXY 監聽連接埠，或在保留原始目標位址的情況下透過 TUN 路由。"
 
 msgid "Device Architecture"
 msgstr "裝置架構"

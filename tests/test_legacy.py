@@ -331,9 +331,9 @@ config_get() {
         mixin.log_level) _mock_value=warning ;;
         mixin.mode) _mock_value=rule ;;
         mixin.match_process) _mock_value=off ;;
-        mixin.tun_enabled) _mock_value=0 ;;
+        mixin.tun_enabled) _mock_value=1 ;;
         mixin.tun_device) _mock_value=nikki ;;
-        mixin.tun_stack) _mock_value=mixed ;;
+        mixin.tun_stack) _mock_value=gvisor ;;
         mixin.dns_enabled) _mock_value=1 ;;
         mixin.dns_listen) _mock_value='[::]:1053' ;;
         routing.core_fw_mark) _mock_value=0x82 ;;
@@ -359,7 +359,7 @@ config_foreach() { :; }
     assert data["log-level"] == "warning"
     assert data["mode"] == "rule"
     assert data["find-process-mode"] == "off"
-    assert data["tun"] == {"enable": False, "device": "nikki", "stack": "mixed"}
+    assert data["tun"] == {"enable": True, "device": "nikki", "stack": "gvisor"}
     assert data["dns"]["enable"] is True
     assert data["dns"]["listen"] == "[::]:1053"
     assert "ipv6" not in data
@@ -1738,6 +1738,23 @@ def test_frontend_backend_contracts() -> None:
     assert "firewallBackend()" in proxy_js
     assert "o.value('redirect', _('REDIRECT'));" in proxy_js
     assert "ipv4_dns_mode" in proxy_js and "o.value('tproxy', _('TPROXY'));" in proxy_js
+    assert proxy_js.count("o.value('redirect', _('REDIRECT DNS LISTEN'));") == 2
+    assert "REDIRECT to Mihomo DNS" not in proxy_js
+    assert "REDIRECT TCP/UDP port 53" not in proxy_js
+    for field, default in (
+        ("ipv4_tcp_mode", "redirect"),
+        ("ipv4_udp_mode", "tun"),
+        ("ipv6_tcp_mode", "redirect"),
+        ("ipv6_udp_mode", "tun"),
+        ("ipv4_dns_mode", "redirect"),
+        ("ipv6_dns_mode", "redirect"),
+    ):
+        start = proxy_js.index(f"'{field}'")
+        assert f"o.default = '{default}';" in proxy_js[start:start + 420]
+    tun_enabled_start = mixin_js.index("'tun_enabled'")
+    assert "o.default = '1';" in mixin_js[tun_enabled_start:tun_enabled_start + 260]
+    tun_stack_start = mixin_js.index("'tun_stack'")
+    assert "o.default = 'gvisor';" in mixin_js[tun_stack_start:tun_stack_start + 260]
     assert ".udp == false" in init
     redirect_check = init[init.index('if [ "$ipv4_tcp_mode" = redirect ] || [ "$ipv6_tcp_mode" = redirect ]'):init.index('if [ "$ipv4_tcp_mode" = tproxy ]', init.index('if [ "$ipv4_tcp_mode" = redirect ] || [ "$ipv6_tcp_mode" = redirect ]'))]
     assert ".listen ==" not in redirect_check
@@ -1810,8 +1827,7 @@ def test_static() -> None:
     assert not (ROOT / "luci-app-nikki/root/usr/share/rpcd/ucode").exists()
     conf = (ROOT / "nikki/files/nikki.conf").read_text()
 
-    # Legacy 5.2 default-policy regression: keep LuCI defaults and the shipped
-    # UCI file aligned. Missing optional mixin fields mean "Unmodified".
+    # Keep LuCI defaults and the shipped UCI file aligned.
     for required_default in (
         "option 'scheduled_restart' '1'",
         "option 'scheduled_restart_cron' '0 3 * * *'",
@@ -1819,9 +1835,9 @@ def test_static() -> None:
         "option 'log_level' 'warning'",
         "option 'mode' 'rule'",
         "option 'match_process' 'off'",
-        "option 'tun_enabled' '0'",
+        "option 'tun_enabled' '1'",
         "option 'tun_device' 'nikki'",
-        "option 'tun_stack' 'mixed'",
+        "option 'tun_stack' 'gvisor'",
         "option 'dns_enabled' '1'",
         "option 'dns_listen' '[::]:1053'",
         "option 'fake_ip_filter' '0'",
@@ -1835,10 +1851,10 @@ def test_static() -> None:
         "option 'rule' '0'",
         "option 'rule_provider' '0'",
         "option 'mixin_file_content' '0'",
-        "option 'ipv4_tcp_mode' 'tproxy'",
-        "option 'ipv4_udp_mode' 'tproxy'",
+        "option 'ipv4_tcp_mode' 'redirect'",
+        "option 'ipv4_udp_mode' 'tun'",
         "option 'ipv6_tcp_mode' 'redirect'",
-        "option 'ipv6_udp_mode' 'tproxy'",
+        "option 'ipv6_udp_mode' 'tun'",
         "option 'ipv4_dns_mode' 'redirect'",
         "option 'ipv6_dns_mode' 'redirect'",
     ):
@@ -1872,8 +1888,12 @@ def test_static() -> None:
     assert "nikki.core_update.repository_preset=custom" in migrate_source
     assert "nikki.core_update.repository_preset=auto" in migrate_source
     assert "nikki.mixin.dns_listen='[::]:1053'" in migrate_source
+    assert "nikki.mixin.tun_enabled=1" in migrate_source
+    assert "nikki.mixin.tun_stack=gvisor" in migrate_source
+    assert "nikki.proxy.ipv4_tcp_mode=redirect" in migrate_source
+    assert "nikki.proxy.ipv4_udp_mode=tun" in migrate_source
     assert "nikki.proxy.ipv6_tcp_mode=redirect" in migrate_source
-    assert "nikki.proxy.ipv6_udp_mode=tproxy" in migrate_source
+    assert "nikki.proxy.ipv6_udp_mode=tun" in migrate_source
     assert "nikki.proxy.ipv6_dns_mode=redirect" in migrate_source
 
     updater_source = (ROOT / "nikki/files/scripts/core_update.sh").read_text()
@@ -1936,10 +1956,10 @@ def test_static() -> None:
     assert ".auto-route = false" in init
     assert ".auto-redirect = false" in init
     assert "PKG_VERSION:=2026.07.18-v6" in makefile
-    assert "PKG_RELEASE:=5" in makefile
+    assert "PKG_RELEASE:=6" in makefile
     luci_makefile = (ROOT / "luci-app-nikki/Makefile").read_text()
     assert "PKG_VERSION:=1.26.1-v6" in luci_makefile
-    assert "PKG_RELEASE:=4" in luci_makefile
+    assert "PKG_RELEASE:=5" in luci_makefile
     assert "Hooks/Prepare/Post += Prepare/SetNikkiRpcExecutable" in luci_makefile
     assert "chmod 0755 $(PKG_BUILD_DIR)/root/usr/libexec/nikki-rpc" in luci_makefile
     permission_fallback = (
