@@ -120,13 +120,13 @@ cat <<'EOF_MODULES'
 ```text
 EOF_MODULES
 for cmd in iptables ip6tables; do
+	"$cmd" -t nat -j REDIRECT -h >/dev/null 2>&1 && echo "$cmd REDIRECT: available" || echo "$cmd REDIRECT: missing"
 	"$cmd" -t mangle -j TPROXY -h >/dev/null 2>&1 && echo "$cmd TPROXY: available" || echo "$cmd TPROXY: missing"
 	"$cmd" -t mangle -j MARK -h >/dev/null 2>&1 && echo "$cmd MARK/TUN: available" || echo "$cmd MARK/TUN: missing"
 	"$cmd" -m owner -h >/dev/null 2>&1 && echo "$cmd owner: available" || echo "$cmd owner: missing"
 	"$cmd" -m set -h >/dev/null 2>&1 && echo "$cmd set: available" || echo "$cmd set: missing"
 	"$cmd" -m dscp -h >/dev/null 2>&1 && echo "$cmd dscp: available" || echo "$cmd dscp: missing"
 done
-printf '%s\n' 'IPv6 NAT/REDIRECT: intentionally unused; IPv6 DNS uses TPROXY or TUN'
 cat <<'EOF_SERVICE'
 ```
 

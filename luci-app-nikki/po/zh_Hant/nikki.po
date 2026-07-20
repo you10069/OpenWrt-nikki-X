@@ -1156,8 +1156,8 @@ msgstr "TUN 裝置檢查間隔"
 msgid "REDIRECT TCP/UDP port 53 to the Mihomo DNS listener, or route it through TUN while preserving the original destination."
 msgstr "將 TCP/UDP 53 連接埠重新導向至 Mihomo DNS 監聽連接埠，或在保留原始目標位址的情況下透過 TUN 路由。"
 
-msgid "TPROXY TCP/UDP port 53 to the Mihomo TPROXY listener, or route it through TUN; neither mode enters the built-in DNS listener."
-msgstr "將 TCP/UDP 53 連接埠 TPROXY 至 Mihomo TPROXY 監聽連接埠，或透過 TUN 路由；兩種模式都不會進入內建 DNS 監聽連接埠。"
+msgid "REDIRECT TCP/UDP port 53 to the dual-stack Mihomo DNS listener, TPROXY it to the Mihomo TPROXY listener, or route it through TUN while preserving the original destination."
+msgstr "將 TCP/UDP 53 連接埠 REDIRECT 至雙棧 Mihomo DNS 監聽連接埠、TPROXY 至 Mihomo TPROXY 監聽連接埠，或在保留原始目標位址的情況下透過 TUN 路由。"
 
 msgid "Device Architecture"
 msgstr "裝置架構"

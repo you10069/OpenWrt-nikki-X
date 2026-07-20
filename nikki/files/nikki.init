@@ -67,7 +67,7 @@ load_legacy_proxy_modes() {
 		[ "$old_v6" -eq 1 ] && ipv6_tcp_mode=tproxy || ipv6_tcp_mode=disable
 		[ "$old_v6" -eq 1 ] && ipv6_udp_mode=tproxy || ipv6_udp_mode=disable
 		[ "$old_dns4" -eq 1 ] && ipv4_dns_mode=redirect || ipv4_dns_mode=disable
-		[ "$old_dns6" -eq 1 ] && ipv6_dns_mode=tproxy || ipv6_dns_mode=disable
+		[ "$old_dns6" -eq 1 ] && ipv6_dns_mode=redirect || ipv6_dns_mode=disable
 	fi
 	: "${ipv4_tcp_mode:=disable}"
 	: "${ipv4_udp_mode:=disable}"
@@ -83,7 +83,7 @@ legacy_modes_valid() {
 	case "$ipv6_tcp_mode" in disable|tproxy|tun) ;; *) return 1 ;; esac
 	case "$ipv6_udp_mode" in disable|tproxy|tun) ;; *) return 1 ;; esac
 	case "$ipv4_dns_mode" in disable|redirect|tun) ;; *) return 1 ;; esac
-	case "$ipv6_dns_mode" in disable|tproxy|tun) ;; *) return 1 ;; esac
+	case "$ipv6_dns_mode" in disable|redirect|tproxy|tun) ;; *) return 1 ;; esac
 }
 
 extra_command 'update_subscription' 'Update subscription by section id'
@@ -411,10 +411,20 @@ start_service() {
 	# check profile
 	if [ "$core_only" = 0 ] && [ "$proxy_enabled" = 1 ]; then
 		log "Profile" "Checking..."
-		if [ "$ipv4_dns_mode" = redirect ]; then
+		if [ "$ipv4_dns_mode" = redirect ] || [ "$ipv6_dns_mode" = redirect ]; then
 			if run_yq -M -e '(has("dns") and (.dns | .enable) and (.dns | has("listen"))) | not' "$RUN_PROFILE_PATH" > /dev/null 2>&1; then
 				log "Profile" "Check failed."
-				log "Profile" "IPv4 DNS REDIRECT requires an enabled Mihomo DNS listener."
+				log "Profile" "DNS REDIRECT requires an enabled Mihomo DNS listener."
+				log "App" "Exit."
+				return
+			fi
+		fi
+		if [ "$ipv6_dns_mode" = redirect ]; then
+			local dns_listen_v6
+			dns_listen_v6="$(run_yq -M -r '.dns.listen // ""' "$RUN_PROFILE_PATH" 2>/dev/null)"
+			if ! printf '%s\n' "$dns_listen_v6" | grep -Eq '^\[::\]:[0-9]+$'; then
+				log "Profile" "Check failed."
+				log "Profile" "IPv6 DNS REDIRECT requires Mihomo DNS to listen on [::]:PORT."
 				log "App" "Exit."
 				return
 			fi

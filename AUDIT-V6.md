@@ -11,7 +11,7 @@ This audit cross-checked LuCI controls, UCI defaults and migration, RPC helper c
 - JSON parsing for menu and RPC ACL declarations.
 - Field/action contract checks across LuCI, RPC and backend commands.
 - Default mixin generation: warning/rule/off, TUN disabled, DNS enabled at `[::]:1053`, optional overrides omitted.
-- Default firewall rendering: IPv4/IPv6 TCP+UDP TPROXY, IPv4 DNS REDIRECT to 1053, IPv6 DNS TPROXY.
+- Default firewall rendering: IPv4/IPv6 TCP+UDP TPROXY and IPv4/IPv6 DNS REDIRECT to the dual-stack Mihomo DNS listener on 1053.
 - Independent REDIRECT/TPROXY/TUN combinations, IPv6 no-NAT invariant, ACLs and policy routes.
 - Core update/check/rollback/delete, architecture matching, ShellCrash fallback, stale lock, insufficient/failed-restart recovery, both-slot preservation and safe archive extraction.
 - RPC controller wildcard normalization and transactional editor writes.

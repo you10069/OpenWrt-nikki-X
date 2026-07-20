@@ -15,9 +15,9 @@
 | IPv6 TCP | 关闭 / TPROXY / TUN |
 | IPv6 UDP | 关闭 / TPROXY / TUN |
 | IPv4 DNS TCP/UDP 53 | 关闭 / REDIRECT 至 Mihomo `dns.listen` / TUN |
-| IPv6 DNS TCP/UDP 53 | 关闭 / TPROXY 至 Mihomo `tproxy-port` / TUN |
+| IPv6 DNS TCP/UDP 53 | 关闭 / REDIRECT 至 Mihomo `dns.listen` / TPROXY 至 Mihomo `tproxy-port` / TUN |
 
-IPv6 不访问 `ip6tables nat` 表，也不依赖 `ip6tables-mod-nat`。
+IPv6 DNS REDIRECT 使用 `ip6tables nat` 表，并依赖 `ip6tables-mod-nat`。默认 Mihomo DNS 监听地址为双栈 `[::]:1053`。
 
 ## 已实现的数据面功能
 
@@ -26,7 +26,7 @@ IPv6 不访问 `ip6tables nat` 表，也不依赖 `ip6tables-mod-nat`。
 - IPv4 TCP/UDP TPROXY；
 - IPv6 TCP/UDP TPROXY；
 - IPv4 DNS TCP/UDP 53 REDIRECT 至 Mihomo 内置 DNS 监听端口，或通过 TUN 路由；
-- IPv6 DNS TCP/UDP 53 TPROXY 至 Mihomo 普通 TPROXY 监听端口，或通过 TUN 路由；
+- IPv6 DNS TCP/UDP 53 REDIRECT 至 Mihomo 内置 DNS 监听端口、TPROXY 至 Mihomo 普通 TPROXY 监听端口，或通过 TUN 路由；
 - IPv4/IPv6 TUN 路由、专用 fwmark 和独立策略路由表；
 - TUN 接口 INPUT/FORWARD 放行；
 - LAN 流量和路由器本机流量；
@@ -137,13 +137,16 @@ IPv4 DNS 使用 REDIRECT 时会进入 Mihomo 内置 DNS 模块；使用 TUN 时�
 
 ```text
 客户端或路由器本机 TCP/UDP 53
+  → ip6tables nat REDIRECT
+  → Mihomo dns.listen（必须监听 `[::]:端口`）
+或：TCP/UDP 53
   → ip6tables mangle TPROXY
   → Mihomo tproxy-port
   → 作为普通透明代理连接继续访问原始 IPv6 DNS 服务器
 或：TCP/UDP 53 → TUN mark → 专用路由表 → Mihomo TUN 设备
 ```
 
-IPv6 DNS 使用 TPROXY 或 TUN 时都不会进入 Mihomo 内置 DNS listener，而是代理原始 DNS 连接；两种方式都无需增加 IPv6 NAT 模块。
+IPv6 DNS 使用 REDIRECT 时进入 Mihomo 内置 DNS listener；使用 TPROXY 或 TUN 时保留原始 DNS 目标并作为透明代理连接处理。
 
 ## TUN 转发
 
@@ -256,10 +259,15 @@ mihomo-alpha
 
 其中 `mihomo-meta` 或 `mihomo-alpha` 仍可选装，用于编译期提供核心或迁移已有核心，但不是 Nikki 软件包的强制依赖。
 
-不依赖：
+额外依赖：
 
 ```text
 ip6tables-mod-nat
+```
+
+不依赖：
+
+```text
 ucode
 rpcd-mod-ucode
 firewall4
@@ -319,12 +327,13 @@ ip link show dev nikki
 /etc/nikki/scripts/debug.sh > /tmp/nikki-debug.txt
 ```
 
-检查 IPv6 规则时，不应出现：
+选择 IPv6 DNS REDIRECT 时，应出现：
 
 ```text
 *nat
-NIK_NAT_*_V6
--j REDIRECT
+NIK_NAT_PRE_DNS_V6
+NIK_NAT_OUT_DNS_V6
+-j REDIRECT --to-ports 1053
 ```
 
 ## 验证状态
@@ -332,9 +341,9 @@ NIK_NAT_*_V6
 - 已通过仓库自带的 `./tests/run-tests.sh`；
 - 覆盖 Shell、JavaScript、JSON 静态检查；
 - 覆盖模拟 UCI/ubus 配置生成；
-- 覆盖 IPv4 TCP REDIRECT/TPROXY、IPv4/IPv6 TUN、IPv4/IPv6 DNS-only TUN、IPv6 DNS-only TPROXY；
+- 覆盖 IPv4 TCP REDIRECT/TPROXY、IPv4/IPv6 TUN、IPv4/IPv6 DNS-only TUN、IPv6 DNS-only REDIRECT/TPROXY；
 - 覆盖 TUN mangle/filter 链和 restore 调用；
-- IPv6 测试会拒绝任何 nat/REDIRECT 规则；
+- IPv6 DNS REDIRECT 测试会验证 nat/REDIRECT 规则，TPROXY/TUN 模式则不会生成 IPv6 NAT 规则；
 - 覆盖精确直链不拼接、ShellCrash 兼容目录、具体到通用架构顺序；
 - 覆盖更新、上一版本保留、回退、删除以及重启失败恢复；
 - 尚未在真实 OpenWrt 21.02 SDK 中完成完整编译，也未在实体路由器上执行真实流量回归测试。

@@ -127,7 +127,7 @@ config_get() {
         proxy.ipv6_tcp_mode) _mock_value=tun ;;
         proxy.ipv6_udp_mode) _mock_value=tproxy ;;
         proxy.ipv4_dns_mode) _mock_value=redirect ;;
-        proxy.ipv6_dns_mode) _mock_value=tproxy ;;
+        proxy.ipv6_dns_mode) _mock_value=redirect ;;
         proxy.tun_timeout) _mock_value=30 ;;
         proxy.tun_interval) _mock_value=1 ;;
         proxy.router_proxy) _mock_value=1 ;;
@@ -401,6 +401,8 @@ log() {{ printf '[%s] %s\\n' "$1" "$2" >> "$APP_LOG_PATH"; }}
         "NIK_MGL_OUT_TUN_V4",
         "NIK_FLT_IN_TUN_V4",
         "NIK_FLT_FWD_TUN_V4",
+        "NIK_NAT_PRE_DNS_V6",
+        "NIK_NAT_OUT_DNS_V6",
         "NIK_MGL_PRE_CTRL_V6",
         "NIK_MGL_PRE_TPROXY_V6",
         "NIK_MGL_PRE_TUN_V6",
@@ -417,11 +419,10 @@ log() {{ printf '[%s] %s\\n' "$1" "$2" >> "$APP_LOG_PATH"; }}
     # iptables -I 1 reverses command order: emitting TCP before DNS leaves DNS first.
     assert rules.index("-I PREROUTING 1 -j NIK_NAT_PRE_TCP_V4") < rules.index("-I PREROUTING 1 -j NIK_NAT_PRE_DNS_V4")
     assert rules.index("-I OUTPUT 1 -j NIK_NAT_OUT_TCP_V4") < rules.index("-I OUTPUT 1 -j NIK_NAT_OUT_DNS_V4")
-    # IPv6 is mangle/TPROXY-only: no NIK_NAT chains or ip6tables nat section.
     ipv6_rules = rules.split("# IPv6 / ip6tables-restore", 1)[1]
-    assert "*nat" not in ipv6_rules
-    assert "NIK_NAT_" not in ipv6_rules
-    assert "REDIRECT" not in ipv6_rules
+    assert "*nat" in ipv6_rules
+    assert "NIK_NAT_PRE_DNS_V6" in ipv6_rules
+    assert "NIK_NAT_OUT_DNS_V6" in ipv6_rules
     assert "-j TPROXY --on-port 7892 --tproxy-mark 0x80/0xFF" in rules
     assert "NIK_MGL_PRE_TUN_V4" in rules
     assert "NIK_MGL_PRE_TUN_V6" in rules
@@ -429,10 +430,10 @@ log() {{ printf '[%s] %s\\n' "$1" "$2" >> "$APP_LOG_PATH"; }}
     assert "-i nikki -j ACCEPT" in rules
     assert "-o nikki -j ACCEPT" in rules
     assert "*filter" in rules
-    assert "NIK_MGL_PRE_TPROXY_V6 -p tcp -j TPROXY --on-port 7892" in rules
     assert "NIK_MGL_PRE_TPROXY_V6 -p udp -j TPROXY --on-port 7892" in rules
-    assert "NIK_MGL_PRE_CTRL_V6 -i br-lan -s 2001:db8::10 -p tcp --dport 53 -j NIK_MGL_PRE_TPROXY_V6" in rules
-    assert "-p tcp --dport 53 -j MARK --set-xmark 0x80/0xFF" in ipv6_rules
+    assert "NIK_MGL_PRE_TPROXY_V6 -p tcp -j TPROXY --on-port 7892" not in rules
+    assert re.search(r"NIK_NAT_PRE_DNS_V6 -i br-lan\s+-s 2001:db8::10 -p udp --dport 53 -j REDIRECT --to-ports 1053", rules)
+    assert re.search(r"NIK_NAT_PRE_DNS_V6 -i br-lan\s+-s 2001:db8::10 -p tcp --dport 53 -j REDIRECT --to-ports 1053", rules)
     assert "-j REDIRECT --to-ports 7891" in rules
     assert re.search(r"NIK_NAT_PRE_DNS_V4 -i br-lan\s+-p udp --dport 53 -j REDIRECT --to-ports 1053", rules)
     assert re.search(r"NIK_NAT_PRE_DNS_V4 -i br-lan\s+-p tcp --dport 53 -j REDIRECT --to-ports 1053", rules)
@@ -492,7 +493,8 @@ log() {{ :; }}
     assert "--dport 53 -j REDIRECT --to-ports 1053" in ipv4
     assert "NIK_MGL_PRE_TPROXY_V6 -p tcp -j TPROXY --on-port 7892" in ipv6
     assert "NIK_MGL_PRE_TPROXY_V6 -p udp -j TPROXY --on-port 7892" in ipv6
-    assert "--dport 53 -j MARK --set-xmark 0x80/0xFF" in ipv6
+    assert "--dport 53 -j REDIRECT --to-ports 1053" in ipv6
+    assert "--dport 53 -j MARK --set-xmark 0x80/0xFF" not in ipv6
 
 
 def test_ipv4_tcp_tproxy(tmp: Path, common: dict) -> None:
@@ -517,7 +519,7 @@ log() {{ :; }}
     text = text.replace("proxy.ipv6_tcp_mode) _mock_value=tun ;;", "proxy.ipv6_tcp_mode) _mock_value=disable ;;")
     text = text.replace("proxy.ipv6_udp_mode) _mock_value=tproxy ;;", "proxy.ipv6_udp_mode) _mock_value=disable ;;")
     text = text.replace("proxy.ipv4_dns_mode) _mock_value=redirect ;;", "proxy.ipv4_dns_mode) _mock_value=disable ;;")
-    text = text.replace("proxy.ipv6_dns_mode) _mock_value=tproxy ;;", "proxy.ipv6_dns_mode) _mock_value=disable ;;")
+    text = text.replace("proxy.ipv6_dns_mode) _mock_value=redirect ;;", "proxy.ipv6_dns_mode) _mock_value=disable ;;")
     write(functions, text)
     script = tmp / "firewall-v4-tcp-tproxy.sh"
     transformed_script(ROOT / "nikki/files/scripts/firewall_fw3.sh", script, functions, include)
@@ -557,6 +559,7 @@ log() {{ :; }}
     functions_text = functions_text.replace("proxy.ipv6_tcp_mode) _mock_value=tun ;;", "proxy.ipv6_tcp_mode) _mock_value=disable ;;")
     functions_text = functions_text.replace("proxy.ipv6_udp_mode) _mock_value=tproxy ;;", "proxy.ipv6_udp_mode) _mock_value=disable ;;")
     functions_text = functions_text.replace("proxy.ipv4_dns_mode) _mock_value=redirect ;;", "proxy.ipv4_dns_mode) _mock_value=disable ;;")
+    functions_text = functions_text.replace("proxy.ipv6_dns_mode) _mock_value=redirect ;;", "proxy.ipv6_dns_mode) _mock_value=tproxy ;;")
     write(functions, functions_text)
 
     bin_dir = tmp / "bin-v6-dns-only"
@@ -591,6 +594,83 @@ echo '{}'
     assert "-p udp --dport 53 -j MARK --set-xmark 0x80/0xFF" in rules
 
 
+def test_ipv6_dns_redirect_only(tmp: Path, common: dict) -> None:
+    runtime = tmp / "runtime-v6-dns-redirect-only"
+    runtime.mkdir()
+    (runtime / "config.yaml").write_text("test: true\n")
+    include = tmp / "include-v6-dns-redirect-only.sh"
+    write(
+        include,
+        f"""#!/bin/sh
+TEMP_DIR="{runtime}"
+RUN_PROFILE_PATH="{runtime / 'config.yaml'}"
+APP_LOG_PATH="{runtime / 'app.log'}"
+prepare_files() {{ mkdir -p "$TEMP_DIR"; : > "$APP_LOG_PATH"; }}
+log() {{ :; }}
+""",
+    )
+
+    functions = tmp / "functions-v6-dns-redirect-only.sh"
+    functions_text = common["functions"].read_text()
+    functions_text = functions_text.replace("proxy.ipv4_tcp_mode) _mock_value=redirect ;;", "proxy.ipv4_tcp_mode) _mock_value=disable ;;")
+    functions_text = functions_text.replace("proxy.ipv4_udp_mode) _mock_value=tun ;;", "proxy.ipv4_udp_mode) _mock_value=disable ;;")
+    functions_text = functions_text.replace("proxy.ipv6_tcp_mode) _mock_value=tun ;;", "proxy.ipv6_tcp_mode) _mock_value=disable ;;")
+    functions_text = functions_text.replace("proxy.ipv6_udp_mode) _mock_value=tproxy ;;", "proxy.ipv6_udp_mode) _mock_value=disable ;;")
+    functions_text = functions_text.replace("proxy.ipv4_dns_mode) _mock_value=redirect ;;", "proxy.ipv4_dns_mode) _mock_value=disable ;;")
+    write(functions, functions_text)
+
+    bin_dir = tmp / "bin-v6-dns-redirect-only"
+    shutil.copytree(common["bin"], bin_dir)
+    write(
+        bin_dir / "yq",
+        """#!/bin/sh
+for arg in "$@"; do
+  case "$arg" in
+    *.dns.listen*) echo '[::]:1053'; exit 0 ;;
+    *redir-port*|*tproxy-port*|*.tun.device*|*.listeners*) echo 'unexpected non-DNS listener lookup' >&2; exit 88 ;;
+  esac
+done
+echo '{}'
+""",
+    )
+
+    script = tmp / "firewall-v6-dns-redirect-only.sh"
+    transformed_script(ROOT / "nikki/files/scripts/firewall_fw3.sh", script, functions, include)
+    env = os.environ.copy()
+    env["PATH"] = f"{bin_dir}:{env['PATH']}"
+    rules = run(["/bin/sh", str(script), "render"], env=env)
+
+    assert "# IPv4 / iptables-restore" not in rules
+    assert "# IPv6 / ip6tables-restore" in rules
+    assert "*nat" in rules
+    assert "NIK_NAT_PRE_DNS_V6" in rules
+    assert "NIK_NAT_OUT_DNS_V6" in rules
+    assert re.search(r"NIK_NAT_PRE_DNS_V6 -i br-lan\s+-p udp --dport 53 -j REDIRECT --to-ports 1053", rules)
+    assert re.search(r"NIK_NAT_PRE_DNS_V6 -i br-lan\s+-p tcp --dport 53 -j REDIRECT --to-ports 1053", rules)
+    assert "-A NIK_NAT_OUT_DNS_V6 -m mark --mark 0x82/0xFF -j RETURN" in rules
+    assert "-j TPROXY" not in rules
+    assert "--set-xmark 0x81/0xFF" not in rules
+
+    write(
+        bin_dir / "yq",
+        """#!/bin/sh
+for arg in "$@"; do
+  case "$arg" in
+    *.dns.listen*) echo '0.0.0.0:1053'; exit 0 ;;
+  esac
+done
+echo '{}'
+""",
+    )
+    invalid = subprocess.run(
+        ["/bin/sh", str(script), "render"],
+        text=True,
+        capture_output=True,
+        env=env,
+    )
+    assert invalid.returncode != 0
+
+
 def test_dns_tun_only(tmp: Path, common: dict) -> None:
     runtime = tmp / "runtime-dns-tun-only"
     runtime.mkdir()
@@ -614,7 +694,7 @@ log() {{ :; }}
     functions_text = functions_text.replace("proxy.ipv6_tcp_mode) _mock_value=tun ;;", "proxy.ipv6_tcp_mode) _mock_value=tproxy ;;")
     functions_text = functions_text.replace("proxy.ipv6_udp_mode) _mock_value=tproxy ;;", "proxy.ipv6_udp_mode) _mock_value=disable ;;")
     functions_text = functions_text.replace("proxy.ipv4_dns_mode) _mock_value=redirect ;;", "proxy.ipv4_dns_mode) _mock_value=tun ;;")
-    functions_text = functions_text.replace("proxy.ipv6_dns_mode) _mock_value=tproxy ;;", "proxy.ipv6_dns_mode) _mock_value=tun ;;")
+    functions_text = functions_text.replace("proxy.ipv6_dns_mode) _mock_value=redirect ;;", "proxy.ipv6_dns_mode) _mock_value=tun ;;")
     write(functions, functions_text)
 
     bin_dir = tmp / "bin-dns-tun-only"
@@ -693,16 +773,7 @@ case " $* " in
 esac
 """
     write(common["bin"] / "iptables", xtables_mock)
-    write(
-        common["bin"] / "ip6tables",
-        """#!/bin/sh
-case " $* " in
-  *" -t nat "*) echo 'unexpected IPv6 nat access' >&2; exit 99 ;;
-  *" -C "*) exit 1 ;;
-  *) exit 0 ;;
-esac
-""",
-    )
+    write(common["bin"] / "ip6tables", xtables_mock)
     write(
         common["bin"] / "iptables-restore",
         f"""#!/bin/sh
@@ -749,10 +820,11 @@ exit 0
     assert "NIK_FLT_FWD_TUN_V6" in rules6
     assert "--set-xmark 0x81/0xFF" in rules4
     assert "--set-xmark 0x81/0xFF" in rules6
-    assert "*nat" not in rules6
-    assert "NIK_NAT_" not in rules6
-    assert "REDIRECT" not in rules6
-    assert "-p tcp -j TPROXY --on-port 7892" in rules6
+    assert "*nat" in rules6
+    assert "NIK_NAT_PRE_DNS_V6" in rules6
+    assert "NIK_NAT_OUT_DNS_V6" in rules6
+    assert "REDIRECT --to-ports 1053" in rules6
+    assert "-p tcp -j TPROXY --on-port 7892" not in rules6
     assert "-p udp -j TPROXY --on-port 7892" in rules6
     assert "family inet6" in sets
     assert "add nik_reserved_v6_t ::1/128 -exist" in sets
@@ -1422,7 +1494,7 @@ def test_static() -> None:
     updater_static = (ROOT / "nikki/files/scripts/core_update.sh").read_text()
     assert "tar -xOzf" in updater_static
     assert "tar -xzf" not in updater_static
-    assert "+ip6tables-mod-nat" not in makefile
+    assert "+ip6tables-mod-nat" in makefile
     assert not (ROOT / "luci-app-nikki/root/usr/share/rpcd/ucode").exists()
     conf = (ROOT / "nikki/files/nikki.conf").read_text()
 
@@ -1456,7 +1528,7 @@ def test_static() -> None:
         "option 'ipv6_tcp_mode' 'tproxy'",
         "option 'ipv6_udp_mode' 'tproxy'",
         "option 'ipv4_dns_mode' 'redirect'",
-        "option 'ipv6_dns_mode' 'tproxy'",
+        "option 'ipv6_dns_mode' 'redirect'",
     ):
         assert required_default in conf
 
@@ -1489,7 +1561,7 @@ def test_static() -> None:
     assert "nikki.mixin.dns_listen='[::]:1053'" in migrate_source
     assert "nikki.proxy.ipv6_tcp_mode=tproxy" in migrate_source
     assert "nikki.proxy.ipv6_udp_mode=tproxy" in migrate_source
-    assert "nikki.proxy.ipv6_dns_mode=tproxy" in migrate_source
+    assert "nikki.proxy.ipv6_dns_mode=redirect" in migrate_source
 
     updater_source = (ROOT / "nikki/files/scripts/core_update.sh").read_text()
     for source in (
@@ -1606,6 +1678,7 @@ def main() -> None:
         test_default_firewall_modes(tmp, common)
         test_ipv4_tcp_tproxy(tmp, common)
         test_ipv6_dns_only(tmp, common)
+        test_ipv6_dns_redirect_only(tmp, common)
         test_dns_tun_only(tmp, common)
         test_firewall_apply(tmp, common)
         test_tun_policy_routes(tmp)

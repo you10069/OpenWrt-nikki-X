@@ -2,7 +2,7 @@ include $(TOPDIR)/rules.mk
 
 PKG_NAME:=nikki
 PKG_VERSION:=2026.07.18-v6
-PKG_RELEASE:=2
+PKG_RELEASE:=3
 PKGARCH:=all
 
 PKG_LICENSE:=GPL-3.0-or-later
@@ -16,14 +16,14 @@ define Package/nikki
   TITLE:=Nikki legacy transparent proxy for firewall3/xtables
   URL:=https://github.com/nikkinikki-org/OpenWrt-nikki
   DEPENDS:=+ca-bundle +curl +yq +jshn +jsonfilter +ubus +firewall +iptables +ip6tables +ipset +ip-full \
-    +iptables-mod-tproxy +iptables-mod-extra +iptables-mod-ipopt \
+    +iptables-mod-tproxy +iptables-mod-extra +iptables-mod-ipopt +ip6tables-mod-nat \
     +kmod-ipt-ipset +kmod-tun
 endef
 
 define Package/nikki/description
   A firewall3/xtables-oriented Nikki fork for OpenWrt 21.02-class systems.
   The backend supports per-family TCP/UDP REDIRECT, TPROXY and TUN routing,
-  IPv4 DNS REDIRECT/TUN and IPv6 DNS TPROXY/TUN without ucode.
+  IPv4 DNS REDIRECT/TUN and IPv6 DNS REDIRECT/TPROXY/TUN without ucode.
 endef
 
 define Package/nikki/conffiles

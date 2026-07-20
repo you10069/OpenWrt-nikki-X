@@ -243,7 +243,7 @@ config_clear_at_stop=$(uci -q get nikki.log.clear_at_stop); [ -z "$config_clear_
 routing_core_fw_mark=$(uci -q get nikki.routing.core_fw_mark); [ -z "$routing_core_fw_mark" ] && uci set nikki.routing.core_fw_mark=0x82
 routing_core_fw_mask=$(uci -q get nikki.routing.core_fw_mask); [ -z "$routing_core_fw_mask" ] && uci set nikki.routing.core_fw_mask=0xFF
 
-# IPv4 DNS REDIRECT requires a deterministic Mihomo DNS listener. Keep the
+# DNS REDIRECT requires a deterministic dual-stack Mihomo DNS listener. Keep the
 # dual-stack 1053 default when the field is absent, while preserving any
 # explicitly configured custom listener.
 mixin_dns_listen=$(uci -q get nikki.mixin.dns_listen)
@@ -265,14 +265,14 @@ if [ -z "$legacy_ipv4_tcp_mode" ]; then
 	[ "$old_ipv6_proxy" = 1 ] && uci set nikki.proxy.ipv6_tcp_mode=tproxy || uci set nikki.proxy.ipv6_tcp_mode=disable
 	[ "$old_ipv6_proxy" = 1 ] && uci set nikki.proxy.ipv6_udp_mode=tproxy || uci set nikki.proxy.ipv6_udp_mode=disable
 	[ "$old_ipv4_dns" = 1 ] && uci set nikki.proxy.ipv4_dns_mode=redirect || uci set nikki.proxy.ipv4_dns_mode=disable
-	[ "$old_ipv6_dns" = 1 ] && uci set nikki.proxy.ipv6_dns_mode=tproxy || uci set nikki.proxy.ipv6_dns_mode=disable
+	[ "$old_ipv6_dns" = 1 ] && uci set nikki.proxy.ipv6_dns_mode=redirect || uci set nikki.proxy.ipv6_dns_mode=disable
 fi
 
 [ -n "$(uci -q get nikki.proxy.ipv4_udp_mode)" ] || uci set nikki.proxy.ipv4_udp_mode=tproxy
 [ -n "$(uci -q get nikki.proxy.ipv6_tcp_mode)" ] || uci set nikki.proxy.ipv6_tcp_mode=tproxy
 [ -n "$(uci -q get nikki.proxy.ipv6_udp_mode)" ] || uci set nikki.proxy.ipv6_udp_mode=tproxy
 [ -n "$(uci -q get nikki.proxy.ipv4_dns_mode)" ] || uci set nikki.proxy.ipv4_dns_mode=redirect
-[ -n "$(uci -q get nikki.proxy.ipv6_dns_mode)" ] || uci set nikki.proxy.ipv6_dns_mode=tproxy
+[ -n "$(uci -q get nikki.proxy.ipv6_dns_mode)" ] || uci set nikki.proxy.ipv6_dns_mode=redirect
 [ -n "$(uci -q get nikki.proxy.tun_timeout)" ] || uci set nikki.proxy.tun_timeout=30
 [ -n "$(uci -q get nikki.proxy.tun_interval)" ] || uci set nikki.proxy.tun_interval=1
 

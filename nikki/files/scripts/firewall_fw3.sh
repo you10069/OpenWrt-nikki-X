@@ -4,9 +4,9 @@
 # Data plane:
 # - IPv4 TCP: disabled / REDIRECT / TPROXY / TUN.
 # - IPv4 UDP: disabled / TPROXY / TUN.
-# - IPv6 TCP/UDP: disabled / TPROXY / TUN (no ip6tables nat dependency).
+# - IPv6 TCP/UDP: disabled / TPROXY / TUN.
 # - IPv4 DNS: REDIRECT to Mihomo dns.listen, or route through TUN.
-# - IPv6 DNS: TPROXY to Mihomo tproxy-port, or route through TUN.
+# - IPv6 DNS: REDIRECT to Mihomo dns.listen, TPROXY, or route through TUN.
 
 . /lib/functions.sh
 . /etc/nikki/scripts/include.sh
@@ -27,6 +27,9 @@ NAT_PRE_DNS_V4="NIK_NAT_PRE_DNS_V4"
 NAT_PRE_TCP_V4="NIK_NAT_PRE_TCP_V4"
 NAT_OUT_DNS_V4="NIK_NAT_OUT_DNS_V4"
 NAT_OUT_TCP_V4="NIK_NAT_OUT_TCP_V4"
+
+NAT_PRE_DNS_V6="NIK_NAT_PRE_DNS_V6"
+NAT_OUT_DNS_V6="NIK_NAT_OUT_DNS_V6"
 
 MGL_PRE_CTRL_V4="NIK_MGL_PRE_CTRL_V4"
 MGL_PRE_TPROXY_V4="NIK_MGL_PRE_TPROXY_V4"
@@ -107,11 +110,14 @@ load_runtime_endpoints() {
 		valid_port "$TPROXY_PORT" || return 1
 	fi
 
-	if mode_is "$IPV4_DNS_MODE" redirect; then
+	if mode_is "$IPV4_DNS_MODE" redirect || mode_is "$IPV6_DNS_MODE" redirect; then
 		dns_listen="$(yq -M -r '.dns.listen // ""' "$RUN_PROFILE_PATH" </dev/null 2>/dev/null)"
 		DNS_LISTEN="$dns_listen"
 		DNS_PORT="$(extract_listen_port "$dns_listen")"
 		valid_port "$DNS_PORT" || return 1
+		if mode_is "$IPV6_DNS_MODE" redirect; then
+			[ "$dns_listen" = "[::]:$DNS_PORT" ] || return 1
+		fi
 	fi
 
 	if [ "$TUN_ACTIVE_V4" -eq 1 ] || [ "$TUN_ACTIVE_V6" -eq 1 ]; then
@@ -234,12 +240,14 @@ remove_ipv4_rules() {
 }
 
 remove_ipv6_rules() {
-	# Intentionally never access an ip6tables nat table.
+	remove_jump "$IPT6" nat PREROUTING "$NAT_PRE_DNS_V6"
+	remove_jump "$IPT6" nat OUTPUT "$NAT_OUT_DNS_V6"
 	remove_jump "$IPT6" mangle PREROUTING "$MGL_PRE_CTRL_V6"
 	remove_jump "$IPT6" mangle OUTPUT "$MGL_OUT_MARK_V6"
 	remove_jump "$IPT6" mangle OUTPUT "$MGL_OUT_TUN_V6"
 	remove_jump "$IPT6" filter INPUT "$FLT_IN_TUN_V6"
 	remove_jump "$IPT6" filter FORWARD "$FLT_FWD_TUN_V6"
+	for chain in "$NAT_PRE_DNS_V6" "$NAT_OUT_DNS_V6"; do remove_chain "$IPT6" nat "$chain"; done
 	for chain in "$MGL_PRE_CTRL_V6" "$MGL_PRE_TPROXY_V6" "$MGL_PRE_TUN_V6" "$MGL_OUT_MARK_V6" "$MGL_OUT_TUN_V6"; do remove_chain "$IPT6" mangle "$chain"; done
 	for chain in "$FLT_IN_TUN_V6" "$FLT_FWD_TUN_V6"; do remove_chain "$IPT6" filter "$chain"; done
 }
@@ -461,6 +469,7 @@ select_ipv4_context() {
 }
 select_ipv6_context() {
 	RULES_FILE="$RULES_FILE_V6"
+	NAT_PRE_DNS="$NAT_PRE_DNS_V6"; NAT_OUT_DNS="$NAT_OUT_DNS_V6"
 	MGL_PRE_CTRL="$MGL_PRE_CTRL_V6"; MGL_PRE_TPROXY="$MGL_PRE_TPROXY_V6"; MGL_PRE_TUN="$MGL_PRE_TUN_V6"; MGL_OUT_MARK="$MGL_OUT_MARK_V6"; MGL_OUT_TUN="$MGL_OUT_TUN_V6"
 	FLT_IN_TUN="$FLT_IN_TUN_V6"; FLT_FWD_TUN="$FLT_FWD_TUN_V6"
 	SET_RESERVED="$SET_RESERVED_V6"; SET_CHINA="$SET_CHINA_V6"; BYPASS_CHINA="$BYPASS_CHINA_V6"
@@ -562,6 +571,24 @@ generate_ipv4_rules() {
 
 generate_ipv6_rules() {
 	select_ipv6_context; : > "$RULES_FILE"
+	if mode_is "$IPV6_DNS_MODE" redirect; then
+		cat >> "$RULES_FILE" <<-EOF_NAT
+		*nat
+		:$NAT_PRE_DNS - [0:0]
+		:$NAT_OUT_DNS - [0:0]
+		EOF_NAT
+		[ "$LAN_PROXY_ENABLED" -eq 1 ] && rule "-I PREROUTING 1 -j $NAT_PRE_DNS"
+		[ "$ROUTER_PROXY" -eq 1 ] && rule "-I OUTPUT 1 -j $NAT_OUT_DNS"
+		if [ "$LAN_PROXY_ENABLED" -eq 1 ]; then
+			for dev in $LAN_DEVICES; do emit_lan_acl "$NAT_PRE_DNS" "$dev" dns_redirect; done
+		fi
+		if [ "$ROUTER_PROXY" -eq 1 ]; then
+			rule "-A $NAT_OUT_DNS -m mark --mark $CORE_MARK/$CORE_MASK -j RETURN"
+			emit_router_acl "$NAT_OUT_DNS" dns_redirect
+		fi
+		rule COMMIT
+	fi
+
 	cat >> "$RULES_FILE" <<-EOF_MGL
 	*mangle
 	:$MGL_PRE_CTRL - [0:0]
@@ -638,7 +665,7 @@ load_config() {
 		[ "$old_v6" -eq 1 ] && IPV6_TCP_MODE=tproxy || IPV6_TCP_MODE=disable
 		[ "$old_v6" -eq 1 ] && IPV6_UDP_MODE=tproxy || IPV6_UDP_MODE=disable
 		[ "$old_dns4" -eq 1 ] && IPV4_DNS_MODE=redirect || IPV4_DNS_MODE=disable
-		[ "$old_dns6" -eq 1 ] && IPV6_DNS_MODE=tproxy || IPV6_DNS_MODE=disable
+		[ "$old_dns6" -eq 1 ] && IPV6_DNS_MODE=redirect || IPV6_DNS_MODE=disable
 	fi
 	: "${IPV4_TCP_MODE:=disable}"; : "${IPV4_UDP_MODE:=disable}"; : "${IPV6_TCP_MODE:=disable}"; : "${IPV6_UDP_MODE:=disable}"; : "${IPV4_DNS_MODE:=disable}"; : "${IPV6_DNS_MODE:=disable}"
 
@@ -677,7 +704,7 @@ validate_modes() {
 	case "$IPV6_TCP_MODE" in disable|tproxy|tun) ;; *) return 1 ;; esac
 	case "$IPV6_UDP_MODE" in disable|tproxy|tun) ;; *) return 1 ;; esac
 	case "$IPV4_DNS_MODE" in disable|redirect|tun) ;; *) return 1 ;; esac
-	case "$IPV6_DNS_MODE" in disable|tproxy|tun) ;; *) return 1 ;; esac
+	case "$IPV6_DNS_MODE" in disable|redirect|tproxy|tun) ;; *) return 1 ;; esac
 }
 
 check_family_backend() {
@@ -698,6 +725,9 @@ check_family_backend() {
 			"$cmd" -t mangle -j MARK -h >/dev/null 2>&1 || return 1
 		fi
 	else
+		if mode_is "$IPV6_DNS_MODE" redirect; then
+			"$cmd" -t nat -j REDIRECT -h >/dev/null 2>&1 || return 1
+		fi
 		if [ "$TPROXY_ACTIVE_V6" -eq 1 ]; then
 			"$cmd" -t mangle -j TPROXY -h >/dev/null 2>&1 || return 1
 		fi
