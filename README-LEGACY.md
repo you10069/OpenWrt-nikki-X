@@ -49,8 +49,8 @@ On first start, a legacy executable at `/usr/libexec/mihomo` or `/usr/bin/mihomo
 
 Available sources:
 
-1. **Official MetaCubeX Releases** — queries the latest release and selects an architecture-compatible asset.
-2. **ShellCrash sources** — choose automatic HTTPS fallback, Cloudflare jsDelivr, standard jsDelivr, GitHub Raw, the author's HTTPS mirror, the legacy HTTP beta source, or a custom compatible repository.
+1. **Official MetaCubeX Releases** — queries the latest release and selects an architecture-compatible asset. Download choices are automatic HTTPS fallback, PROXY acceleration, PROXYNET acceleration, or the direct GitHub link. Release metadata first uses the GitHub API directly for up to 10 seconds and then falls back to `gh-proxy.com`. Automatic asset download tries `gh-proxy.com`, `ghproxy.net`, and the direct GitHub URL in that order.
+2. **ShellCrash sources** — choose automatic HTTPS fallback, JSdelivr CF, standard jsDelivr CDN, the direct GitHub link, the HTTPS mirror, the HTTP beta source, or a custom compatible repository.
 3. **Custom Releases URL + tag** — uses `latest` or an exact tag such as `v1.19.16`.
 4. **Exact direct URL** — downloads the configured URL verbatim and never appends or rewrites its path.
 
@@ -169,7 +169,7 @@ A modern Go feed may still be needed if you choose to compile a Mihomo package o
 
 ## Validation status
 
-`./tests/run-tests.sh` covers shell/JavaScript/JSON static checks, simulated UCI/ubus mixin generation, independent mode combinations, IPv4/IPv6 rule rendering, IPv6 TCP REDIRECT, IPv4 DNS TPROXY, TUN chains and restore calls. DNS-only TPROXY/TUN tests verify that no unintended NAT/REDIRECT rules are generated. Core-updater simulations cover exact direct URLs, ShellCrash-compatible repository paths, architecture ordering, update/rollback/delete and restart-failure recovery.
+`./tests/run-tests.sh` covers shell/JavaScript/JSON static checks, simulated UCI/ubus mixin generation, independent mode combinations, IPv4/IPv6 rule rendering, IPv6 TCP REDIRECT, IPv4 DNS TPROXY, TUN chains and restore calls. DNS-only TPROXY/TUN tests verify that no unintended NAT/REDIRECT rules are generated. Core-updater simulations cover the official API fallback and all official download presets, exact direct URLs, ShellCrash-compatible repository paths, architecture ordering, update/rollback/delete and restart-failure recovery.
 
 This source has not yet completed a full build in a real OpenWrt 21.02 SDK or physical-router traffic regression testing.
 

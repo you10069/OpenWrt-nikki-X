@@ -56,8 +56,8 @@ Nikki 软件包不再强制依赖虚拟包 `mihomo`。服务固定运行受管�
 
 ### 四种更新源
 
-1. **MetaCubeX 官方 Releases**：查询官方最新 Release，并选择适配本机架构的资产。
-2. **ShellCrash 源**：可选择 HTTPS 自动回退、Cloudflare jsDelivr、标准 jsDelivr、GitHub Raw、作者 HTTPS 源、旧设备 HTTP 内测源，或自定义兼容仓库。
+1. **MetaCubeX 官方 Releases**：查询官方最新 Release，并选择适配本机架构的资产。下载源可选择自动 HTTPS 回退、PROXY 加速、PROXYNET 加速或 GitHub 直链。版本查询先直连 GitHub API，最多等待 10 秒，失败后通过 `gh-proxy.com` 查询；自动下载依次尝试 `gh-proxy.com`、`ghproxy.net` 和 GitHub 直链。
+2. **ShellCrash 源**：可选择自动 HTTPS 回退、JSdelivr CF、jsDelivr CDN、GitHub 直链、HTTPS 镜像、HTTP 内测源（不安全），或自定义兼容仓库。
 3. **自定义 Releases 地址 + Tag**：填写 Releases 根地址；Tag 默认 `latest`，也可填写 `v1.19.16` 等任意指定版本。
 4. **精确直链**：完整 URL 原样下载，不自动拼接、改写路径或替换参数。
 
@@ -350,7 +350,7 @@ NIK_NAT_OUT_TCP_V6
 - 覆盖 IPv4 TCP REDIRECT/TPROXY、IPv6 TCP REDIRECT、IPv4 DNS TPROXY、IPv4/IPv6 TUN、IPv4/IPv6 DNS-only TUN、IPv6 DNS-only REDIRECT/TPROXY；
 - 覆盖 TUN mangle/filter 链和 restore 调用；
 - IPv6 DNS REDIRECT 测试会验证 nat/REDIRECT 规则，DNS-only TPROXY/TUN 模式则不会生成非预期 NAT 规则；
-- 覆盖精确直链不拼接、ShellCrash 兼容目录、具体到通用架构顺序；
+- 覆盖官方 API 回退和四种官方下载源、精确直链不拼接、ShellCrash 兼容目录、具体到通用架构顺序；
 - 覆盖更新、上一版本保留、回退、删除以及重启失败恢复；
 - 尚未在真实 OpenWrt 21.02 SDK 中完成完整编译，也未在实体路由器上执行真实流量回归测试。
 

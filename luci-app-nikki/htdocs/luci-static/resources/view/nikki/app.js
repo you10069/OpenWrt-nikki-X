@@ -21,6 +21,7 @@ const callUciCommit = rpc.declare({
 
 const coreUpdateConfigOptions = [
     'source_type',
+    'official_preset',
     'repository_preset',
     'repository_url',
     'releases_url',
@@ -407,16 +408,26 @@ return view.extend({
         o.value('release', _('Custom Releases URL'));
         o.value('direct', _('Exact Direct URL'));
 
+        o = s.option(form.ListValue, 'official_preset', _('Official Download Source'));
+        o.default = 'auto';
+        o.rmempty = false;
+        o.depends('source_type', 'official');
+        o.value('auto', _('Automatic HTTPS Fallback (Recommended)'));
+        o.value('proxy', _('PROXY Acceleration (Recommended)'));
+        o.value('proxynet', _('PROXYNET Acceleration'));
+        o.value('github', _('GitHub Direct'));
+        o.description = _('Release metadata first uses the GitHub API directly for up to 10 seconds, then falls back to the PROXY service. Automatic downloads try PROXY, PROXYNET, and GitHub Direct in order.');
+
         o = s.option(form.ListValue, 'repository_preset', _('ShellCrash Source'));
         o.default = 'auto';
         o.rmempty = false;
         o.depends('source_type', 'repository');
         o.value('auto', _('Automatic HTTPS Fallback (Recommended)'));
-        o.value('cloudflare', _('Cloudflare jsDelivr (Recommended by ShellCrash)'));
+        o.value('cloudflare', _('JSdelivr CF (Recommended)'));
         o.value('jsdelivr', _('jsDelivr CDN'));
-        o.value('github', _('GitHub Raw'));
-        o.value('author_https', _('Author HTTPS Mirror'));
-        o.value('author_http', _('Author HTTP Beta Source (Unsafe)'));
+        o.value('github', _('GitHub Direct'));
+        o.value('author_https', _('HTTPS Mirror'));
+        o.value('author_http', _('HTTP Beta Source (Unsafe)'));
         o.value('custom', _('Custom ShellCrash-Compatible Repository'));
         o.description = _('Automatic mode tries all four HTTPS sources and never falls back to the unencrypted HTTP beta source.');
 

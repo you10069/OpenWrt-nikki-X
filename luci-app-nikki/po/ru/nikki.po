@@ -1277,20 +1277,37 @@ msgstr ""
 msgid "Automatic HTTPS Fallback (Recommended)"
 msgstr ""
 
-msgid "Cloudflare jsDelivr (Recommended by ShellCrash)"
-msgstr ""
 
 msgid "jsDelivr CDN"
 msgstr ""
 
-msgid "GitHub Raw"
+
+
+
+msgid "Official Download Source"
 msgstr ""
 
-msgid "Author HTTPS Mirror"
+msgid "PROXY Acceleration (Recommended)"
 msgstr ""
 
-msgid "Author HTTP Beta Source (Unsafe)"
+msgid "PROXYNET Acceleration"
 msgstr ""
+
+msgid "GitHub Direct"
+msgstr ""
+
+msgid "Release metadata first uses the GitHub API directly for up to 10 seconds, then falls back to the PROXY service. Automatic downloads try PROXY, PROXYNET, and GitHub Direct in order."
+msgstr ""
+
+msgid "JSdelivr CF (Recommended)"
+msgstr ""
+
+msgid "HTTPS Mirror"
+msgstr ""
+
+msgid "HTTP Beta Source (Unsafe)"
+msgstr ""
+
 
 msgid "Automatic mode tries all four HTTPS sources and never falls back to the unencrypted HTTP beta source."
 msgstr ""

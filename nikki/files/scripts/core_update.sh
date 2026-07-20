@@ -20,6 +20,9 @@ SERVICE_BIN="${SERVICE_BIN:-/etc/init.d/nikki}"
 
 SOURCE_TYPE=official
 OFFICIAL_REPOSITORY=MetaCubeX/mihomo
+OFFICIAL_PRESET=auto
+RESOLVED_OFFICIAL_DOWNLOAD_CHANNEL=
+RESOLVED_OFFICIAL_URL=
 REPOSITORY_PRESET=auto
 REPOSITORY_URL=
 RESOLVED_REPOSITORY_BASE=
@@ -115,6 +118,7 @@ load_config() {
 	local value preset_configured
 	value="$(uci_get nikki.core_update.source_type)"; [ -n "$value" ] && SOURCE_TYPE="$value"
 	value="$(uci_get nikki.core_update.official_repository)"; [ -n "$value" ] && OFFICIAL_REPOSITORY="$value"
+	value="$(uci_get nikki.core_update.official_preset)"; [ -n "$value" ] && OFFICIAL_PRESET="$value"
 	preset_configured="$(uci_get nikki.core_update.repository_preset)"
 	value="$(uci_get nikki.core_update.repository_url)"; [ -n "$value" ] && REPOSITORY_URL="$value"
 	if [ -n "$preset_configured" ]; then
@@ -133,6 +137,7 @@ load_config() {
 	value="$(uci_get nikki.core_update.min_free_kb)"; [ -n "$value" ] && MIN_FREE_KB="$value"
 
 	case "$SOURCE_TYPE" in official|repository|release|direct) ;; *) SOURCE_TYPE=official ;; esac
+	case "$OFFICIAL_PRESET" in auto|proxy|proxynet|github) ;; *) OFFICIAL_PRESET=auto ;; esac
 	case "$REPOSITORY_PRESET" in auto|cloudflare|jsdelivr|github|author_https|author_http|custom) ;; *) REPOSITORY_PRESET=auto ;; esac
 	case "$DOWNLOAD_TIMEOUT" in ''|*[!0-9]*|0) DOWNLOAD_TIMEOUT=120 ;; esac
 	case "$DOWNLOAD_RETRY" in ''|*[!0-9]*) DOWNLOAD_RETRY=2 ;; esac
@@ -252,21 +257,45 @@ repository_bases() {
 	esac
 }
 
+official_preset_label() {
+	case "$OFFICIAL_PRESET" in
+		auto) printf '自动 HTTPS 回退（推荐）' ;;
+		proxy) printf 'PROXY 加速（推荐）' ;;
+		proxynet) printf 'PROXYNET 加速' ;;
+		github) printf 'GitHub 直链' ;;
+	esac
+}
+
+official_channel_label() {
+	case "$1" in
+		proxy) printf 'PROXY 加速' ;;
+		proxynet) printf 'PROXYNET 加速' ;;
+		github) printf 'GitHub 直链' ;;
+		*) return 1 ;;
+	esac
+}
+
 repository_preset_label() {
 	case "$REPOSITORY_PRESET" in
 		auto) printf 'ShellCrash 自动选择 HTTPS 源' ;;
-		cloudflare) printf 'ShellCrash Cloudflare jsDelivr' ;;
+		cloudflare) printf 'ShellCrash JSdelivr CF（推荐）' ;;
 		jsdelivr) printf 'ShellCrash jsDelivr CDN' ;;
-		github) printf 'ShellCrash GitHub Raw' ;;
-		author_https) printf 'ShellCrash 作者 HTTPS 源' ;;
-		author_http) printf 'ShellCrash 作者 HTTP 内测源' ;;
+		github) printf 'ShellCrash GitHub 直链' ;;
+		author_https) printf 'ShellCrash HTTPS 镜像' ;;
+		author_http) printf 'ShellCrash HTTP 内测源（不安全）' ;;
 		custom) printf 'ShellCrash 自定义兼容仓库' ;;
 	esac
 }
 
 source_label() {
 	case "$SOURCE_TYPE" in
-		official) printf 'MetaCubeX/mihomo official releases' ;;
+		official)
+			if [ -n "$RESOLVED_OFFICIAL_DOWNLOAD_CHANNEL" ]; then
+				printf 'MetaCubeX/mihomo 官方发布 · %s' "$(official_channel_label "$RESOLVED_OFFICIAL_DOWNLOAD_CHANNEL")"
+			else
+				printf 'MetaCubeX/mihomo 官方发布 · %s' "$(official_preset_label)"
+			fi
+			;;
 		repository)
 			if [ -n "$RESOLVED_REPOSITORY_BASE" ]; then
 				printf '%s: %s' "$(repository_preset_label)" "$RESOLVED_REPOSITORY_BASE"
@@ -291,12 +320,72 @@ extract_version_token() {
 	printf '%s\n' "$1" | sed -n 's/.*\(v[0-9][0-9]*\(\.[0-9][0-9]*\)\{1,3\}\([._+-][0-9A-Za-z._+-]*\)\?\).*/\1/p' | head -n 1
 }
 
-resolve_github_latest_tag() {
-	local repository="$1" json tag
-	json="$(fetch_text "https://api.github.com/repos/${repository}/releases/latest")" || return 1
-	tag="$(printf '%s' "$json" | "$YQ_BIN" -M -p json -r '.tag_name // ""' 2>/dev/null)"
+validate_official_release_json() {
+	local json_file="$1" tag asset_count
+	[ -s "$json_file" ] || return 1
+	tag="$("$YQ_BIN" -M -p json -r '.tag_name // ""' "$json_file" 2>/dev/null)"
+	asset_count="$("$YQ_BIN" -M -p json -r '.assets | length' "$json_file" 2>/dev/null)"
+	[ -n "$tag" ] && [ "$tag" != null ] || return 1
+	case "$asset_count" in ''|*[!0-9]*) return 1 ;; esac
+	[ "$asset_count" -gt 0 ]
+}
+
+fetch_official_release_json() {
+	local repository="$1" output="$2" channel url
+		for channel in github proxy; do
+		case "$channel" in
+			github) url="https://api.github.com/repos/${repository}/releases/latest" ;;
+			proxy) url="https://gh-proxy.com/https://api.github.com/repos/${repository}/releases/latest" ;;
+		esac
+		rm -f "$output"
+		if "$CURL_BIN" -fL --connect-timeout 10 --max-time 10 --retry 0 -A "$USER_AGENT" -sS -o "$output" "$url" 2>/dev/null \
+			&& validate_official_release_json "$output"; then
+			return 0
+		fi
+	done
+	rm -f "$output"
+	return 1
+}
+
+official_release_tag() {
+	local json_file="$1" tag
+	tag="$("$YQ_BIN" -M -p json -r '.tag_name // ""' "$json_file" 2>/dev/null)"
 	[ -n "$tag" ] && [ "$tag" != null ] || return 1
 	printf '%s' "$tag"
+}
+
+official_download_channels() {
+	case "$OFFICIAL_PRESET" in
+		auto) printf '%s\n' proxy proxynet github ;;
+		proxy) printf '%s\n' proxy ;;
+		proxynet) printf '%s\n' proxynet ;;
+		github) printf '%s\n' github ;;
+	esac
+}
+
+official_asset_url() {
+	local channel="$1" original="$2"
+	case "$channel" in
+		proxy) printf 'https://gh-proxy.com/%s' "$original" ;;
+		proxynet) printf 'https://ghproxy.net/%s' "$original" ;;
+		github) printf '%s' "$original" ;;
+		*) return 1 ;;
+	esac
+}
+
+download_official_asset() {
+	local original="$1" output="$2" channel candidate
+	RESOLVED_OFFICIAL_DOWNLOAD_CHANNEL=
+	RESOLVED_OFFICIAL_URL=
+	for channel in $(official_download_channels); do
+		candidate="$(official_asset_url "$channel" "$original")" || continue
+		if try_download "$candidate" "$output"; then
+			RESOLVED_OFFICIAL_DOWNLOAD_CHANNEL="$channel"
+			RESOLVED_OFFICIAL_URL="$candidate"
+			return 0
+		fi
+	done
+	return 1
 }
 
 resolve_release_tag() {
@@ -327,11 +416,15 @@ resolve_repository_version() {
 }
 
 check_source() {
-	local latest base found
+	local latest base found json_file
 	load_config
+	RESOLVED_OFFICIAL_DOWNLOAD_CHANNEL=
 	case "$SOURCE_TYPE" in
 		official)
-			latest="$(resolve_github_latest_tag "$OFFICIAL_REPOSITORY")" || return 1
+			json_file="$TEMP_ROOT/nikki-release.$$.json"
+			cleanup_paths="$cleanup_paths $json_file"
+			fetch_official_release_json "$OFFICIAL_REPOSITORY" "$json_file" || return 1
+			latest="$(official_release_tag "$json_file")" || return 1
 			;;
 		repository)
 			found=0
@@ -394,14 +487,15 @@ resolve_and_download() {
 	load_config
 	case "$SOURCE_TYPE" in
 		official)
-			latest="$(resolve_github_latest_tag "$OFFICIAL_REPOSITORY")" || return 1
 			json_file="$TEMP_ROOT/nikki-release.$$.json"
 			cleanup_paths="$cleanup_paths $json_file"
-			fetch_text "https://api.github.com/repos/${OFFICIAL_REPOSITORY}/releases/latest" > "$json_file" || return 1
+			fetch_official_release_json "$OFFICIAL_REPOSITORY" "$json_file" || return 1
+			latest="$(official_release_tag "$json_file")" || return 1
 			pair="$(find_official_asset "$latest" "$json_file")" || return 1
 			url="$(printf '%s' "$pair" | cut -f1)"
 			name="$(printf '%s' "$pair" | cut -f2-)"
-			try_download "$url" "$output" || return 1
+			download_official_asset "$url" "$output" || return 1
+			url="$RESOLVED_OFFICIAL_URL"
 			;;
 		repository)
 			found=0

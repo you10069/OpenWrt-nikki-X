@@ -1,3 +1,13 @@
+## 2026-07-20 · Official download channels and source labels (nikki r5 / luci r4)
+
+- Added an official MetaCubeX download-source selector with automatic HTTPS fallback, PROXY acceleration, PROXYNET acceleration and GitHub direct-link modes.
+- Unified official release metadata lookup: try the GitHub API directly for up to 10 seconds, then retry through `gh-proxy.com`.
+- Made automatic official asset download try `gh-proxy.com`, `ghproxy.net` and the original GitHub Release URL in order.
+- Reused one validated Release JSON response for both version detection and architecture asset matching.
+- Renamed ShellCrash source labels to JSdelivr CF, jsDelivr CDN, GitHub direct link, HTTPS mirror and HTTP beta source without changing their underlying URLs or fallback order.
+- Added updater simulations for every official download preset and API fallback behavior.
+- Bumped the nikki package release to r5 and luci-app-nikki to r4.
+
 ## 2026-07-20 · IPv6 TCP REDIRECT and IPv4 DNS TPROXY (nikki r4)
 
 - Added IPv6 TCP REDIRECT for LAN and router-originated traffic through ip6tables nat chains, using the existing Mihomo Redirect Port/Listener.

@@ -1143,6 +1143,184 @@ esac
     run(["/bin/sh", str(updater), "delete-previous"], env=env)
     assert not previous.exists()
 
+def test_official_source_channels(tmp: Path) -> None:
+    tag = "v1.2.3"
+    asset_name = "mihomo-linux-aarch64_cortex-a53-v1.2.3.tar.gz"
+    original_url = (
+        "https://github.com/MetaCubeX/mihomo/releases/download/"
+        f"{tag}/{asset_name}"
+    )
+    api_url = "https://api.github.com/repos/MetaCubeX/mihomo/releases/latest"
+    proxy_api_url = "https://gh-proxy.com/" + api_url
+    channel_urls = {
+        "proxy": "https://gh-proxy.com/" + original_url,
+        "proxynet": "https://ghproxy.net/" + original_url,
+        "github": original_url,
+    }
+
+    def run_case(name: str, preset: str, direct_api_ok: bool, success_channel: str):
+        runtime = tmp / f"official-{name}"
+        bin_dir = runtime / "bin"
+        core_dir = runtime / "core"
+        home_dir = runtime / "etc"
+        temp_dir = runtime / "tmp"
+        bin_dir.mkdir(parents=True)
+        core_dir.mkdir()
+        home_dir.mkdir()
+        temp_dir.mkdir()
+
+        active = core_dir / "mihomo"
+        previous = core_dir / "mihomo.prev"
+        download = runtime / "download-core"
+        release_json = runtime / "release.json"
+        curl_log = runtime / "curl.log"
+        make_fake_core(active, "v1.0.0")
+        make_fake_core(download, tag)
+        release_json.write_text(
+            json.dumps(
+                {
+                    "tag_name": tag,
+                    "assets": [
+                        {
+                            "name": asset_name,
+                            "browser_download_url": original_url,
+                        }
+                    ],
+                }
+            )
+        )
+
+        write(
+            bin_dir / "uci",
+            f'''#!/bin/sh
+key="$3"
+case "$key" in
+  nikki.core_update.source_type) echo official ;;
+  nikki.core_update.official_repository) echo MetaCubeX/mihomo ;;
+  nikki.core_update.official_preset) echo {preset} ;;
+  nikki.core_update.user_agent) echo test ;;
+  nikki.core_update.timeout) echo 30 ;;
+  nikki.core_update.retry) echo 0 ;;
+  nikki.core_update.min_free_kb) echo 1 ;;
+  *) exit 1 ;;
+esac
+''',
+        )
+        write(
+            bin_dir / "yq",
+            r'''#!/bin/sh
+args="$*"
+for last do :; done
+case "$args" in
+  *'.tag_name // ""'*)
+    sed -n 's/.*"tag_name": "\([^"]*\)".*/\1/p' "$last"
+    ;;
+  *'.assets | length'*)
+    grep -o '"browser_download_url"' "$last" | wc -l | tr -d ' '
+    ;;
+  *'.assets[]'*'.browser_download_url'*)
+    grep -Fq "\"name\": \"$ASSET_NAME\"" "$last" || exit 0
+    sed -n 's/.*"browser_download_url": "\([^"]*\)".*/\1/p' "$last"
+    ;;
+  *) exit 1 ;;
+esac
+''',
+        )
+        direct_api_action = (
+            f'[ -n "$out" ] || exit 22; cp "{release_json}" "$out"'
+            if direct_api_ok
+            else "exit 28"
+        )
+        success_url = channel_urls[success_channel]
+        write(
+            bin_dir / "curl",
+            f'''#!/bin/sh
+out=''
+url=''
+max_time=''
+retry=''
+while [ "$#" -gt 0 ]; do
+  case "$1" in
+    -o) out="$2"; shift 2 ;;
+    -w) shift 2 ;;
+    -A|--connect-timeout) shift 2 ;;
+    --max-time) max_time="$2"; shift 2 ;;
+    --retry) retry="$2"; shift 2 ;;
+    -f|-L|-s|-S|-sS) shift ;;
+    *) url="$1"; shift ;;
+  esac
+done
+printf '%s|%s|%s\n' "$max_time" "$retry" "$url" >> "{curl_log}"
+case "$url" in
+  {api_url}) {direct_api_action} ;;
+  {proxy_api_url}) [ -n "$out" ] || exit 22; cp "{release_json}" "$out" ;;
+  {success_url}) [ -n "$out" ] || exit 22; cp "{download}" "$out" ;;
+  *) exit 22 ;;
+esac
+''',
+        )
+        write(
+            bin_dir / "opkg",
+            '''#!/bin/sh
+[ "$1" = print-architecture ] || exit 1
+printf '%s\n' 'arch all 1' 'arch aarch64_cortex-a53 10'
+''',
+        )
+        write(bin_dir / "uname", "#!/bin/sh\necho aarch64\n")
+        write(bin_dir / "service", "#!/bin/sh\nexit 1\n")
+
+        updater = ROOT / "nikki/files/scripts/core_update.sh"
+        env = os.environ.copy()
+        env.update(
+            {
+                "HOME_DIR": str(home_dir),
+                "CORE_DIR": str(core_dir),
+                "CORE_ACTIVE": str(active),
+                "CORE_PREVIOUS": str(previous),
+                "STATE_FILE": str(home_dir / "core-update.state"),
+                "LOCK_DIR": str(runtime / "update.lock"),
+                "TEMP_ROOT": str(temp_dir),
+                "UCI_BIN": str(bin_dir / "uci"),
+                "CURL_BIN": str(bin_dir / "curl"),
+                "YQ_BIN": str(bin_dir / "yq"),
+                "OPKG_BIN": str(bin_dir / "opkg"),
+                "APK_BIN": str(bin_dir / "missing-apk"),
+                "UNAME_BIN": str(bin_dir / "uname"),
+                "SERVICE_BIN": str(bin_dir / "service"),
+            }
+        )
+        assert run(["/bin/sh", str(updater), "update"], env=env).strip() == tag
+        assert run([str(active), "-v"]).split()[2] == tag
+        state = (home_dir / "core-update.state").read_text()
+        assert f"resolved_url={success_url}" in state
+        return curl_log.read_text().splitlines()
+
+    auto_calls = run_case("auto", "auto", False, "proxynet")
+    assert auto_calls == [
+        f"10|0|{api_url}",
+        f"10|0|{proxy_api_url}",
+        f"30|0|{channel_urls['proxy']}",
+        f"30|0|{channel_urls['proxynet']}",
+    ]
+
+    proxy_calls = run_case("proxy", "proxy", True, "proxy")
+    assert proxy_calls == [
+        f"10|0|{api_url}",
+        f"30|0|{channel_urls['proxy']}",
+    ]
+
+    proxynet_calls = run_case("proxynet", "proxynet", True, "proxynet")
+    assert proxynet_calls == [
+        f"10|0|{api_url}",
+        f"30|0|{channel_urls['proxynet']}",
+    ]
+
+    github_calls = run_case("github", "github", True, "github")
+    assert github_calls == [
+        f"10|0|{api_url}",
+        f"30|0|{channel_urls['github']}",
+    ]
+
 def test_shellcrash_repository_update(tmp: Path) -> None:
     runtime = tmp / "repository-update"
     bin_dir = runtime / "bin"
@@ -1690,6 +1868,7 @@ def test_static() -> None:
     migrate_source = (ROOT / "nikki/files/uci-defaults/migrate.sh").read_text()
     assert "nikki.config.scheduled_restart=1" in migrate_source
     assert "nikki.config.scheduled_restart_cron='0 3 * * *'" in migrate_source
+    assert "nikki.core_update.official_preset=auto" in migrate_source
     assert "nikki.core_update.repository_preset=custom" in migrate_source
     assert "nikki.core_update.repository_preset=auto" in migrate_source
     assert "nikki.mixin.dns_listen='[::]:1053'" in migrate_source
@@ -1698,6 +1877,14 @@ def test_static() -> None:
     assert "nikki.proxy.ipv6_dns_mode=redirect" in migrate_source
 
     updater_source = (ROOT / "nikki/files/scripts/core_update.sh").read_text()
+    for official_source in (
+        "https://gh-proxy.com/https://api.github.com/repos/",
+        "https://gh-proxy.com/%s",
+        "https://ghproxy.net/%s",
+    ):
+        assert official_source in updater_source
+    assert '--max-time 10 --retry 0' in updater_source
+    assert "auto) printf '%s\\n' proxy proxynet github" in updater_source
     for source in (
         "https://cdn.jsdelivr.net/gh/juewuy/ShellCrash@dev",
         "https://raw.githubusercontent.com/juewuy/ShellCrash/dev",
@@ -1706,8 +1893,20 @@ def test_static() -> None:
         "http://t.jwsc.eu.org",
     ):
         assert source in updater_source
+    assert "official_preset" in conf
     assert "repository_preset" in conf
-    assert "Automatic HTTPS Fallback" in (ROOT / "luci-app-nikki/htdocs/luci-static/resources/view/nikki/app.js").read_text()
+    app_update_source = (ROOT / "luci-app-nikki/htdocs/luci-static/resources/view/nikki/app.js").read_text()
+    assert "Automatic HTTPS Fallback" in app_update_source
+    for label in (
+        "PROXY Acceleration (Recommended)", "PROXYNET Acceleration", "GitHub Direct",
+        "JSdelivr CF (Recommended)", "HTTPS Mirror", "HTTP Beta Source (Unsafe)",
+    ):
+        assert label in app_update_source
+    for obsolete_label in (
+        "Cloudflare jsDelivr (Recommended by ShellCrash)", "GitHub Raw",
+        "Author HTTPS Mirror", "Author HTTP Beta Source (Unsafe)",
+    ):
+        assert obsolete_label not in app_update_source
     proxy_js = (ROOT / "luci-app-nikki/htdocs/luci-static/resources/view/nikki/proxy.js").read_text()
     for key in (
         "ipv4_tcp_mode", "ipv4_udp_mode", "ipv6_tcp_mode",
@@ -1737,10 +1936,10 @@ def test_static() -> None:
     assert ".auto-route = false" in init
     assert ".auto-redirect = false" in init
     assert "PKG_VERSION:=2026.07.18-v6" in makefile
-    assert "PKG_RELEASE:=4" in makefile
+    assert "PKG_RELEASE:=5" in makefile
     luci_makefile = (ROOT / "luci-app-nikki/Makefile").read_text()
     assert "PKG_VERSION:=1.26.1-v6" in luci_makefile
-    assert "PKG_RELEASE:=3" in luci_makefile
+    assert "PKG_RELEASE:=4" in luci_makefile
     assert "Hooks/Prepare/Post += Prepare/SetNikkiRpcExecutable" in luci_makefile
     assert "chmod 0755 $(PKG_BUILD_DIR)/root/usr/libexec/nikki-rpc" in luci_makefile
     permission_fallback = (
@@ -1780,6 +1979,8 @@ def test_static() -> None:
     assert "coreInfo.resolved_url" in core_block
     assert "coreInfo.previous_version" in core_block
     assert "MetaCubeX Official Latest Version" in core_block
+    assert "official_preset" in core_block
+    assert "Official Download Source" in core_block
     assert "o.default = 'https://github.com/MetaCubeX/mihomo/releases';" in core_block
     assert "persistCoreUpdateConfig(coreUpdateSection)" in core_block
     assert "Configuration changed. Save changes or check for updates again." in app_js
@@ -1820,6 +2021,7 @@ def main() -> None:
         test_firewall_apply(tmp, common)
         test_tun_policy_routes(tmp)
         test_core_update(tmp)
+        test_official_source_channels(tmp)
         test_shellcrash_repository_update(tmp)
         test_shellcrash_automatic_https_fallback(tmp)
         test_core_archive_extraction(tmp)

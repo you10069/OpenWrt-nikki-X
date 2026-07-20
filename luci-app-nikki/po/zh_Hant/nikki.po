@@ -1275,22 +1275,39 @@ msgid "ShellCrash Source"
 msgstr "ShellCrash 來源"
 
 msgid "Automatic HTTPS Fallback (Recommended)"
-msgstr "HTTPS 自動回退（推薦）"
+msgstr "自動 HTTPS 回退（推薦）"
 
-msgid "Cloudflare jsDelivr (Recommended by ShellCrash)"
-msgstr "Cloudflare jsDelivr（ShellCrash 推薦）"
 
 msgid "jsDelivr CDN"
 msgstr "jsDelivr CDN"
 
-msgid "GitHub Raw"
-msgstr "GitHub Raw"
 
-msgid "Author HTTPS Mirror"
-msgstr "作者 HTTPS 鏡像"
 
-msgid "Author HTTP Beta Source (Unsafe)"
-msgstr "作者 HTTP 內測源（不安全）"
+
+msgid "Official Download Source"
+msgstr "MetaCubeX 官方下載源"
+
+msgid "PROXY Acceleration (Recommended)"
+msgstr "PROXY 加速（推薦）"
+
+msgid "PROXYNET Acceleration"
+msgstr "PROXYNET 加速"
+
+msgid "GitHub Direct"
+msgstr "GitHub 直鏈"
+
+msgid "Release metadata first uses the GitHub API directly for up to 10 seconds, then falls back to the PROXY service. Automatic downloads try PROXY, PROXYNET, and GitHub Direct in order."
+msgstr "Release 中繼資料先直接連線 GitHub API，最多等待 10 秒；失敗後回退到 PROXY 服務。自動下載依序嘗試 PROXY、PROXYNET 和 GitHub 直鏈。"
+
+msgid "JSdelivr CF (Recommended)"
+msgstr "JSdelivr CF（推薦）"
+
+msgid "HTTPS Mirror"
+msgstr "HTTPS 鏡像"
+
+msgid "HTTP Beta Source (Unsafe)"
+msgstr "HTTP 內測源（不安全）"
+
 
 msgid "Automatic mode tries all four HTTPS sources and never falls back to the unencrypted HTTP beta source."
 msgstr "自動模式依次嘗試四個 HTTPS 來源，絕不會回退到未加密的 HTTP 內測來源。"

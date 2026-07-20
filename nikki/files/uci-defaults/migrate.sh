@@ -288,6 +288,7 @@ section_core_update=$(uci -q get nikki.core_update); [ -z "$section_core_update"
 	uci set nikki.core_update=core_update
 	uci set nikki.core_update.source_type=official
 	uci set nikki.core_update.official_repository=MetaCubeX/mihomo
+	uci set nikki.core_update.official_preset=auto
 	uci set nikki.core_update.repository_preset=auto
 	uci set nikki.core_update.repository_url=''
 	uci set nikki.core_update.releases_url='https://github.com/MetaCubeX/mihomo/releases'
@@ -298,6 +299,9 @@ section_core_update=$(uci -q get nikki.core_update); [ -z "$section_core_update"
 	uci set nikki.core_update.retry=2
 	uci set nikki.core_update.min_free_kb=32768
 }
+
+core_update_official_preset=$(uci -q get nikki.core_update.official_preset)
+[ -n "$core_update_official_preset" ] || uci set nikki.core_update.official_preset=auto
 
 # Legacy v5 had only repository_url. Persist the same interpretation used by
 # the backend so LuCI and the updater show and use the identical source.
