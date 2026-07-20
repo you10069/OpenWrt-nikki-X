@@ -11,8 +11,8 @@ cat <<'EOF_HEAD'
 
 ```text
 OpenWrt 21.02-class firewall3/xtables backend
-IPv4: TCP REDIRECT + UDP TPROXY
-IPv6: TCP/UDP/DNS TPROXY only
+IPv4: TCP REDIRECT/TPROXY/TUN + UDP TPROXY/TUN + DNS REDIRECT/TUN
+IPv6: TCP/UDP TPROXY/TUN + DNS TPROXY/TUN
 ```
 
 ## System
@@ -126,7 +126,7 @@ for cmd in iptables ip6tables; do
 	"$cmd" -m set -h >/dev/null 2>&1 && echo "$cmd set: available" || echo "$cmd set: missing"
 	"$cmd" -m dscp -h >/dev/null 2>&1 && echo "$cmd dscp: available" || echo "$cmd dscp: missing"
 done
-printf '%s\n' 'IPv6 NAT/REDIRECT: intentionally unused; IPv6 DNS uses TPROXY'
+printf '%s\n' 'IPv6 NAT/REDIRECT: intentionally unused; IPv6 DNS uses TPROXY or TUN'
 cat <<'EOF_SERVICE'
 ```
 

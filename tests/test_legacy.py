@@ -590,6 +590,82 @@ echo '{}'
     assert "-p tcp --dport 53 -j MARK --set-xmark 0x80/0xFF" in rules
     assert "-p udp --dport 53 -j MARK --set-xmark 0x80/0xFF" in rules
 
+
+def test_dns_tun_only(tmp: Path, common: dict) -> None:
+    runtime = tmp / "runtime-dns-tun-only"
+    runtime.mkdir()
+    (runtime / "config.yaml").write_text("test: true\n")
+    include = tmp / "include-dns-tun-only.sh"
+    write(
+        include,
+        f"""#!/bin/sh
+TEMP_DIR="{runtime}"
+RUN_PROFILE_PATH="{runtime / 'config.yaml'}"
+APP_LOG_PATH="{runtime / 'app.log'}"
+prepare_files() {{ mkdir -p "$TEMP_DIR"; : > "$APP_LOG_PATH"; }}
+log() {{ :; }}
+""",
+    )
+
+    functions = tmp / "functions-dns-tun-only.sh"
+    functions_text = common["functions"].read_text()
+    functions_text = functions_text.replace("proxy.ipv4_tcp_mode) _mock_value=redirect ;;", "proxy.ipv4_tcp_mode) _mock_value=tproxy ;;")
+    functions_text = functions_text.replace("proxy.ipv4_udp_mode) _mock_value=tun ;;", "proxy.ipv4_udp_mode) _mock_value=disable ;;")
+    functions_text = functions_text.replace("proxy.ipv6_tcp_mode) _mock_value=tun ;;", "proxy.ipv6_tcp_mode) _mock_value=tproxy ;;")
+    functions_text = functions_text.replace("proxy.ipv6_udp_mode) _mock_value=tproxy ;;", "proxy.ipv6_udp_mode) _mock_value=disable ;;")
+    functions_text = functions_text.replace("proxy.ipv4_dns_mode) _mock_value=redirect ;;", "proxy.ipv4_dns_mode) _mock_value=tun ;;")
+    functions_text = functions_text.replace("proxy.ipv6_dns_mode) _mock_value=tproxy ;;", "proxy.ipv6_dns_mode) _mock_value=tun ;;")
+    write(functions, functions_text)
+
+    bin_dir = tmp / "bin-dns-tun-only"
+    shutil.copytree(common["bin"], bin_dir)
+    write(
+        bin_dir / "yq",
+        """#!/bin/sh
+for arg in "$@"; do
+  case "$arg" in
+    *redir-port*|*.dns.listen*) echo 'unexpected REDIRECT/DNS listener lookup' >&2; exit 88 ;;
+    *tproxy-port*) echo 7892; exit 0 ;;
+    *.tun.device*|*.listeners*) echo nikki; exit 0 ;;
+  esac
+done
+echo '{}'
+""",
+    )
+
+    script = tmp / "firewall-dns-tun-only.sh"
+    transformed_script(ROOT / "nikki/files/scripts/firewall_fw3.sh", script, functions, include)
+    env = os.environ.copy()
+    env["PATH"] = f"{bin_dir}:{env['PATH']}"
+    rules = run(["/bin/sh", str(script), "render"], env=env)
+
+    assert "# IPv4 / iptables-restore" in rules
+    assert "# IPv6 / ip6tables-restore" in rules
+    ipv6_rules = rules.split("# IPv6 / ip6tables-restore", 1)[1]
+    assert "*nat" not in ipv6_rules
+    assert "REDIRECT" not in rules
+    assert "--dport 53 -j NIK_MGL_PRE_TPROXY_V4" not in rules
+    assert "--dport 53 -j NIK_MGL_PRE_TPROXY_V6" not in rules
+    assert "--dport 53 -j MARK --set-xmark 0x80/0xFF" not in rules
+    for family in ("V4", "V6"):
+        assert f"-A NIK_MGL_PRE_TUN_{family} -j MARK --set-xmark 0x81/0xFF" in rules
+        assert re.search(
+            rf"-A NIK_MGL_PRE_CTRL_{family} .* -p udp --dport 53 -j NIK_MGL_PRE_TUN_{family}\n"
+            rf"-A NIK_MGL_PRE_CTRL_{family} .* -p udp --dport 53 -j RETURN",
+            rules,
+        )
+        assert re.search(
+            rf"-A NIK_MGL_PRE_CTRL_{family} .* -p tcp --dport 53 -j NIK_MGL_PRE_TUN_{family}\n"
+            rf"-A NIK_MGL_PRE_CTRL_{family} .* -p tcp --dport 53 -j RETURN",
+            rules,
+        )
+        assert re.search(rf"-A NIK_MGL_OUT_TUN_{family} .* -p udp --dport 53 -j MARK --set-xmark 0x81/0xFF", rules)
+        assert re.search(rf"-A NIK_MGL_OUT_TUN_{family} .* -p tcp --dport 53 -j MARK --set-xmark 0x81/0xFF", rules)
+        dns_jump = re.search(rf"-A NIK_MGL_PRE_CTRL_{family} -i br-lan .*--dport 53 -j NIK_MGL_PRE_TUN_{family}", rules)
+        general_tproxy = re.search(rf"-A NIK_MGL_PRE_CTRL_{family} -i br-lan .* -j NIK_MGL_PRE_TPROXY_{family}", rules)
+        assert dns_jump and general_tproxy
+        assert dns_jump.start() < general_tproxy.start()
+
 def test_firewall_apply(tmp: Path, common: dict) -> None:
     runtime = tmp / "runtime-apply"
     runtime.mkdir()
@@ -1530,6 +1606,7 @@ def main() -> None:
         test_default_firewall_modes(tmp, common)
         test_ipv4_tcp_tproxy(tmp, common)
         test_ipv6_dns_only(tmp, common)
+        test_dns_tun_only(tmp, common)
         test_firewall_apply(tmp, common)
         test_tun_policy_routes(tmp)
         test_core_update(tmp)

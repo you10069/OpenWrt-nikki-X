@@ -23,7 +23,7 @@ endef
 define Package/nikki/description
   A firewall3/xtables-oriented Nikki fork for OpenWrt 21.02-class systems.
   The backend supports per-family TCP/UDP REDIRECT, TPROXY and TUN routing,
-  IPv4 DNS REDIRECT to Mihomo DNS, and IPv6 DNS TPROXY without ucode.
+  IPv4 DNS REDIRECT/TUN and IPv6 DNS TPROXY/TUN without ucode.
 endef
 
 define Package/nikki/conffiles

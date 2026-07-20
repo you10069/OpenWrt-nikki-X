@@ -12,8 +12,8 @@ Legacy v5 preserves the Legacy v4 transparent-proxy data plane and adds managed 
 | IPv4 UDP | Disable / TPROXY / TUN |
 | IPv6 TCP | Disable / TPROXY / TUN |
 | IPv6 UDP | Disable / TPROXY / TUN |
-| IPv4 DNS TCP/UDP 53 | Disable / REDIRECT to Mihomo `dns.listen` |
-| IPv6 DNS TCP/UDP 53 | Disable / TPROXY to Mihomo `tproxy-port` as ordinary transparent traffic |
+| IPv4 DNS TCP/UDP 53 | Disable / REDIRECT to Mihomo `dns.listen` / TUN |
+| IPv6 DNS TCP/UDP 53 | Disable / TPROXY to Mihomo `tproxy-port` / TUN |
 
 IPv6 does not access the ip6tables nat table and does not require `ip6tables-mod-nat`.
 
@@ -22,8 +22,8 @@ Implemented data-plane features:
 - independent IPv4/IPv6 TCP and UDP mode selection;
 - IPv4 TCP REDIRECT and TCP/UDP TPROXY;
 - IPv6 TCP/UDP TPROXY;
-- IPv4 DNS REDIRECT to the Mihomo DNS listener;
-- IPv6 DNS interception through the Mihomo TPROXY listener;
+- IPv4 DNS REDIRECT to the Mihomo DNS listener, or routing through TUN;
+- IPv6 DNS interception through the Mihomo TPROXY listener, or routing through TUN;
 - IPv4/IPv6 TUN routing using a dedicated fwmark and policy-routing table;
 - TUN INPUT and FORWARD acceptance chains for both families;
 - LAN and router-originated traffic handling;
@@ -111,9 +111,11 @@ NIK_FLT_FWD_TUN_V6
 ```text
 IPv4 DNS:
 TCP/UDP 53 -> nat REDIRECT -> Mihomo dns.listen
+or TCP/UDP 53 -> TUN mark -> dedicated route table -> Mihomo TUN device
 
 IPv6 DNS:
 TCP/UDP 53 -> mangle TPROXY -> Mihomo tproxy-port
+or TCP/UDP 53 -> TUN mark -> dedicated route table -> Mihomo TUN device
 
 TPROXY LAN:
 PREROUTING -> NIK_MGL_PRE_CTRL_Vx -> NIK_MGL_PRE_TPROXY_Vx

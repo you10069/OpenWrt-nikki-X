@@ -14,8 +14,8 @@
 | IPv4 UDP | 关闭 / TPROXY / TUN |
 | IPv6 TCP | 关闭 / TPROXY / TUN |
 | IPv6 UDP | 关闭 / TPROXY / TUN |
-| IPv4 DNS TCP/UDP 53 | 关闭 / REDIRECT 至 Mihomo `dns.listen` |
-| IPv6 DNS TCP/UDP 53 | 关闭 / TPROXY 至 Mihomo `tproxy-port`，作为普通透明代理流量 |
+| IPv4 DNS TCP/UDP 53 | 关闭 / REDIRECT 至 Mihomo `dns.listen` / TUN |
+| IPv6 DNS TCP/UDP 53 | 关闭 / TPROXY 至 Mihomo `tproxy-port` / TUN |
 
 IPv6 不访问 `ip6tables nat` 表，也不依赖 `ip6tables-mod-nat`。
 
@@ -25,8 +25,8 @@ IPv6 不访问 `ip6tables nat` 表，也不依赖 `ip6tables-mod-nat`。
 - IPv4 TCP REDIRECT；
 - IPv4 TCP/UDP TPROXY；
 - IPv6 TCP/UDP TPROXY；
-- IPv4 DNS TCP/UDP 53 REDIRECT 至 Mihomo 内置 DNS 监听端口；
-- IPv6 DNS TCP/UDP 53 TPROXY 至 Mihomo 普通 TPROXY 监听端口；
+- IPv4 DNS TCP/UDP 53 REDIRECT 至 Mihomo 内置 DNS 监听端口，或通过 TUN 路由；
+- IPv6 DNS TCP/UDP 53 TPROXY 至 Mihomo 普通 TPROXY 监听端口，或通过 TUN 路由；
 - IPv4/IPv6 TUN 路由、专用 fwmark 和独立策略路由表；
 - TUN 接口 INPUT/FORWARD 放行；
 - LAN 流量和路由器本机流量；
@@ -128,9 +128,10 @@ LuCI 状态页显示：
   → iptables nat REDIRECT
   → Mihomo dns.listen（例如 1053）
   → Mihomo 内置 DNS 模块
+或：TCP/UDP 53 → TUN mark → 专用路由表 → Mihomo TUN 设备
 ```
 
-IPv4 DNS 会使用 fake-ip、hosts、nameserver-policy 等 Mihomo DNS 配置。
+IPv4 DNS 使用 REDIRECT 时会进入 Mihomo 内置 DNS 模块；使用 TUN 时会保留原始 DNS 目标并通过 TUN 路由。
 
 ### IPv6 DNS
 
@@ -139,9 +140,10 @@ IPv4 DNS 会使用 fake-ip、hosts、nameserver-policy 等 Mihomo DNS 配置。
   → ip6tables mangle TPROXY
   → Mihomo tproxy-port
   → 作为普通透明代理连接继续访问原始 IPv6 DNS 服务器
+或：TCP/UDP 53 → TUN mark → 专用路由表 → Mihomo TUN 设备
 ```
 
-IPv6 DNS 不是送入 Mihomo 内置 DNS listener；它是强制代理 DNS 连接。这样无需增加 IPv6 NAT 模块。
+IPv6 DNS 使用 TPROXY 或 TUN 时都不会进入 Mihomo 内置 DNS listener，而是代理原始 DNS 连接；两种方式都无需增加 IPv6 NAT 模块。
 
 ## TUN 转发
 
@@ -330,7 +332,7 @@ NIK_NAT_*_V6
 - 已通过仓库自带的 `./tests/run-tests.sh`；
 - 覆盖 Shell、JavaScript、JSON 静态检查；
 - 覆盖模拟 UCI/ubus 配置生成；
-- 覆盖 IPv4 TCP REDIRECT/TPROXY、IPv4/IPv6 TUN、IPv6 DNS-only TPROXY；
+- 覆盖 IPv4 TCP REDIRECT/TPROXY、IPv4/IPv6 TUN、IPv4/IPv6 DNS-only TUN、IPv6 DNS-only TPROXY；
 - 覆盖 TUN mangle/filter 链和 restore 调用；
 - IPv6 测试会拒绝任何 nat/REDIRECT 规则；
 - 覆盖精确直链不拼接、ShellCrash 兼容目录、具体到通用架构顺序；

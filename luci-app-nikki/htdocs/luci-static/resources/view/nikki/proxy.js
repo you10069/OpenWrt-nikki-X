@@ -74,15 +74,17 @@ return view.extend({
         o.value('tproxy', _('TPROXY'));
         o.value('tun', _('TUN'));
 
-        o = s.taboption('proxy', form.ListValue, 'ipv4_dns_mode', _('IPv4 DNS Mode'), _('REDIRECT TCP/UDP port 53 to the Mihomo DNS listener.'));
+        o = s.taboption('proxy', form.ListValue, 'ipv4_dns_mode', _('IPv4 DNS Mode'), _('REDIRECT TCP/UDP port 53 to the Mihomo DNS listener, or route it through TUN while preserving the original destination.'));
         o.rmempty = false;
         o.value('disable', _('Disable'));
         o.value('redirect', _('REDIRECT to Mihomo DNS'));
+        o.value('tun', _('TUN'));
 
-        o = s.taboption('proxy', form.ListValue, 'ipv6_dns_mode', _('IPv6 DNS Mode'), _('TPROXY TCP/UDP port 53 to the Mihomo TPROXY listener as ordinary transparent traffic; it does not enter the built-in DNS listener.'));
+        o = s.taboption('proxy', form.ListValue, 'ipv6_dns_mode', _('IPv6 DNS Mode'), _('TPROXY TCP/UDP port 53 to the Mihomo TPROXY listener, or route it through TUN; neither mode enters the built-in DNS listener.'));
         o.rmempty = false;
         o.value('disable', _('Disable'));
         o.value('tproxy', _('TPROXY'));
+        o.value('tun', _('TUN'));
 
         o = s.taboption('proxy', form.Value, 'tun_timeout', _('TUN Device Timeout'));
         o.datatype = 'range(1, 3600)';
@@ -91,6 +93,8 @@ return view.extend({
         o.depends('ipv4_udp_mode', 'tun');
         o.depends('ipv6_tcp_mode', 'tun');
         o.depends('ipv6_udp_mode', 'tun');
+        o.depends('ipv4_dns_mode', 'tun');
+        o.depends('ipv6_dns_mode', 'tun');
 
         o = s.taboption('proxy', form.Value, 'tun_interval', _('TUN Device Check Interval'));
         o.datatype = 'range(1, 60)';
@@ -99,6 +103,8 @@ return view.extend({
         o.depends('ipv4_udp_mode', 'tun');
         o.depends('ipv6_tcp_mode', 'tun');
         o.depends('ipv6_udp_mode', 'tun');
+        o.depends('ipv4_dns_mode', 'tun');
+        o.depends('ipv6_dns_mode', 'tun');
 
         s.tab('router', _('Router Proxy'));
 

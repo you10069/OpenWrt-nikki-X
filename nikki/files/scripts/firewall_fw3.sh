@@ -5,8 +5,8 @@
 # - IPv4 TCP: disabled / REDIRECT / TPROXY / TUN.
 # - IPv4 UDP: disabled / TPROXY / TUN.
 # - IPv6 TCP/UDP: disabled / TPROXY / TUN (no ip6tables nat dependency).
-# - IPv4 DNS: REDIRECT to Mihomo dns.listen.
-# - IPv6 DNS: TPROXY to Mihomo tproxy-port as ordinary transparent traffic.
+# - IPv4 DNS: REDIRECT to Mihomo dns.listen, or route through TUN.
+# - IPv6 DNS: TPROXY to Mihomo tproxy-port, or route through TUN.
 
 . /lib/functions.sh
 . /etc/nikki/scripts/include.sh
@@ -339,6 +339,16 @@ _emit_lan_target() {
 				rule "-A $LAN_CHAIN $base -p udp --dport 53 -j RETURN"
 				rule "-A $LAN_CHAIN $base -p tcp --dport 53 -j RETURN"
 			fi ;;
+		dns_tun)
+			if [ "$dns" -eq 1 ]; then
+				rule "-A $LAN_CHAIN $base -p udp --dport 53 -j $MGL_PRE_TUN"
+				rule "-A $LAN_CHAIN $base -p udp --dport 53 -j RETURN"
+				rule "-A $LAN_CHAIN $base -p tcp --dport 53 -j $MGL_PRE_TUN"
+				rule "-A $LAN_CHAIN $base -p tcp --dport 53 -j RETURN"
+			else
+				rule "-A $LAN_CHAIN $base -p udp --dport 53 -j RETURN"
+				rule "-A $LAN_CHAIN $base -p tcp --dport 53 -j RETURN"
+			fi ;;
 		tcp_redirect|tcp_tproxy|tcp_tun)
 			[ "$FAMILY_DNS_ACTIVE" -eq 1 ] && rule "-A $LAN_CHAIN $base -p tcp --dport 53 -j RETURN"
 			if [ "$proxy" -eq 1 ]; then
@@ -397,6 +407,16 @@ _emit_router_target() {
 				rule "-A $RTR_CHAIN $base -p udp --dport 53 -j RETURN"
 				rule "-A $RTR_CHAIN $base -p tcp --dport 53 -j RETURN"
 			fi ;;
+		dns_tun)
+			if [ "$RTR_DNS" -eq 1 ]; then
+				rule "-A $RTR_CHAIN $base -p udp --dport 53 -j MARK --set-xmark $TUN_MARK/$TUN_MASK"
+				rule "-A $RTR_CHAIN $base -p udp --dport 53 -j RETURN"
+				rule "-A $RTR_CHAIN $base -p tcp --dport 53 -j MARK --set-xmark $TUN_MARK/$TUN_MASK"
+				rule "-A $RTR_CHAIN $base -p tcp --dport 53 -j RETURN"
+			else
+				rule "-A $RTR_CHAIN $base -p udp --dport 53 -j RETURN"
+				rule "-A $RTR_CHAIN $base -p tcp --dport 53 -j RETURN"
+			fi ;;
 		tcp_redirect|tcp_tproxy|tcp_tun)
 			[ "$FAMILY_DNS_ACTIVE" -eq 1 ] && rule "-A $RTR_CHAIN $base -p tcp --dport 53 -j RETURN"
 			if [ "$RTR_PROXY" -eq 1 ]; then
@@ -437,7 +457,7 @@ select_ipv4_context() {
 	FLT_IN_TUN="$FLT_IN_TUN_V4"; FLT_FWD_TUN="$FLT_FWD_TUN_V4"
 	SET_RESERVED="$SET_RESERVED_V4"; SET_CHINA="$SET_CHINA_V4"; BYPASS_CHINA="$BYPASS_CHINA_V4"
 	LAN_IP_OPTION=ip; LAN_VALIDATE_FN=valid_ipv4_or_cidr
-	FAMILY_DNS_ACTIVE=0; mode_is "$IPV4_DNS_MODE" redirect && FAMILY_DNS_ACTIVE=1
+	FAMILY_DNS_ACTIVE=0; mode_active "$IPV4_DNS_MODE" && FAMILY_DNS_ACTIVE=1
 }
 select_ipv6_context() {
 	RULES_FILE="$RULES_FILE_V6"
@@ -445,7 +465,7 @@ select_ipv6_context() {
 	FLT_IN_TUN="$FLT_IN_TUN_V6"; FLT_FWD_TUN="$FLT_FWD_TUN_V6"
 	SET_RESERVED="$SET_RESERVED_V6"; SET_CHINA="$SET_CHINA_V6"; BYPASS_CHINA="$BYPASS_CHINA_V6"
 	LAN_IP_OPTION=ip6; LAN_VALIDATE_FN=valid_ipv6_or_cidr
-	FAMILY_DNS_ACTIVE=0; mode_is "$IPV6_DNS_MODE" tproxy && FAMILY_DNS_ACTIVE=1
+	FAMILY_DNS_ACTIVE=0; mode_active "$IPV6_DNS_MODE" && FAMILY_DNS_ACTIVE=1
 }
 
 emit_tun_filter_table() {
@@ -511,6 +531,7 @@ generate_ipv4_rules() {
 		fi
 		if [ "$LAN_PROXY_ENABLED" -eq 1 ]; then
 			for dev in $LAN_DEVICES; do
+				mode_is "$IPV4_DNS_MODE" tun && emit_lan_acl "$MGL_PRE_CTRL" "$dev" dns_tun
 				case "$IPV4_TCP_MODE" in
 					tproxy) emit_common_bypass "$MGL_PRE_CTRL" "-i $dev -p tcp"; normalize_port_tokens "$PROXY_TCP_DPORT"; emit_lan_acl "$MGL_PRE_CTRL" "$dev" tcp_tproxy ;;
 					tun) emit_common_bypass "$MGL_PRE_CTRL" "-i $dev -p tcp"; normalize_port_tokens "$PROXY_TCP_DPORT"; emit_lan_acl "$MGL_PRE_CTRL" "$dev" tcp_tun ;;
@@ -529,6 +550,7 @@ generate_ipv4_rules() {
 			fi
 			if [ "$TUN_ACTIVE_V4" -eq 1 ]; then
 				rule "-A $MGL_OUT_TUN -m mark --mark $CORE_MARK/$CORE_MASK -j RETURN"
+				mode_is "$IPV4_DNS_MODE" tun && emit_router_acl "$MGL_OUT_TUN" dns_tun
 				case "$IPV4_TCP_MODE" in tun) emit_common_bypass "$MGL_OUT_TUN" "-p tcp"; normalize_port_tokens "$PROXY_TCP_DPORT"; emit_router_acl "$MGL_OUT_TUN" tcp_tun ;; esac
 				case "$IPV4_UDP_MODE" in tun) emit_common_bypass "$MGL_OUT_TUN" "-p udp"; normalize_port_tokens "$PROXY_UDP_DPORT"; emit_router_acl "$MGL_OUT_TUN" udp_tun ;; esac
 			fi
@@ -563,6 +585,7 @@ generate_ipv6_rules() {
 		if [ "$LAN_PROXY_ENABLED" -eq 1 ]; then
 			for dev in $LAN_DEVICES; do
 				mode_is "$IPV6_DNS_MODE" tproxy && emit_lan_acl "$MGL_PRE_CTRL" "$dev" dns_tproxy
+				mode_is "$IPV6_DNS_MODE" tun && emit_lan_acl "$MGL_PRE_CTRL" "$dev" dns_tun
 				case "$IPV6_TCP_MODE" in
 					tproxy) emit_common_bypass "$MGL_PRE_CTRL" "-i $dev -p tcp"; normalize_port_tokens "$PROXY_TCP_DPORT"; emit_lan_acl "$MGL_PRE_CTRL" "$dev" tcp_tproxy ;;
 					tun) emit_common_bypass "$MGL_PRE_CTRL" "-i $dev -p tcp"; normalize_port_tokens "$PROXY_TCP_DPORT"; emit_lan_acl "$MGL_PRE_CTRL" "$dev" tcp_tun ;;
@@ -582,6 +605,7 @@ generate_ipv6_rules() {
 			fi
 			if [ "$TUN_ACTIVE_V6" -eq 1 ]; then
 				rule "-A $MGL_OUT_TUN -m mark --mark $CORE_MARK/$CORE_MASK -j RETURN"
+				mode_is "$IPV6_DNS_MODE" tun && emit_router_acl "$MGL_OUT_TUN" dns_tun
 				case "$IPV6_TCP_MODE" in tun) emit_common_bypass "$MGL_OUT_TUN" "-p tcp"; normalize_port_tokens "$PROXY_TCP_DPORT"; emit_router_acl "$MGL_OUT_TUN" tcp_tun ;; esac
 				case "$IPV6_UDP_MODE" in tun) emit_common_bypass "$MGL_OUT_TUN" "-p udp"; normalize_port_tokens "$PROXY_UDP_DPORT"; emit_router_acl "$MGL_OUT_TUN" udp_tun ;; esac
 			fi
@@ -635,8 +659,8 @@ load_config() {
 	# Avoid shell &&/|| precedence ambiguity.
 	if mode_is "$IPV4_TCP_MODE" tproxy || mode_is "$IPV4_UDP_MODE" tproxy; then TPROXY_ACTIVE_V4=1; fi
 	if mode_is "$IPV6_TCP_MODE" tproxy || mode_is "$IPV6_UDP_MODE" tproxy || mode_is "$IPV6_DNS_MODE" tproxy; then TPROXY_ACTIVE_V6=1; fi
-	if mode_is "$IPV4_TCP_MODE" tun || mode_is "$IPV4_UDP_MODE" tun; then TUN_ACTIVE_V4=1; fi
-	if mode_is "$IPV6_TCP_MODE" tun || mode_is "$IPV6_UDP_MODE" tun; then TUN_ACTIVE_V6=1; fi
+	if mode_is "$IPV4_TCP_MODE" tun || mode_is "$IPV4_UDP_MODE" tun || mode_is "$IPV4_DNS_MODE" tun; then TUN_ACTIVE_V4=1; fi
+	if mode_is "$IPV6_TCP_MODE" tun || mode_is "$IPV6_UDP_MODE" tun || mode_is "$IPV6_DNS_MODE" tun; then TUN_ACTIVE_V6=1; fi
 	LAN_DEVICES=""; config_list_foreach proxy lan_inbound_interface _add_lan_device
 }
 
@@ -652,8 +676,8 @@ validate_modes() {
 	case "$IPV4_UDP_MODE" in disable|tproxy|tun) ;; *) return 1 ;; esac
 	case "$IPV6_TCP_MODE" in disable|tproxy|tun) ;; *) return 1 ;; esac
 	case "$IPV6_UDP_MODE" in disable|tproxy|tun) ;; *) return 1 ;; esac
-	case "$IPV4_DNS_MODE" in disable|redirect) ;; *) return 1 ;; esac
-	case "$IPV6_DNS_MODE" in disable|tproxy) ;; *) return 1 ;; esac
+	case "$IPV4_DNS_MODE" in disable|redirect|tun) ;; *) return 1 ;; esac
+	case "$IPV6_DNS_MODE" in disable|tproxy|tun) ;; *) return 1 ;; esac
 }
 
 check_family_backend() {

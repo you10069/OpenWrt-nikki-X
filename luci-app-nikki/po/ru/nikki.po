@@ -1153,10 +1153,10 @@ msgstr ""
 msgid "TUN Device Check Interval"
 msgstr ""
 
-msgid "REDIRECT TCP/UDP port 53 to the Mihomo DNS listener."
+msgid "REDIRECT TCP/UDP port 53 to the Mihomo DNS listener, or route it through TUN while preserving the original destination."
 msgstr ""
 
-msgid "TPROXY TCP/UDP port 53 to the Mihomo TPROXY listener as ordinary transparent traffic; it does not enter the built-in DNS listener."
+msgid "TPROXY TCP/UDP port 53 to the Mihomo TPROXY listener, or route it through TUN; neither mode enters the built-in DNS listener."
 msgstr ""
 
 msgid "Device Architecture"
