@@ -88,20 +88,15 @@ legacy_modes_valid() {
 
 extra_command 'update_subscription' 'Update subscription by section id'
 extra_command 'clear_logs' 'Clear logs if size exceeds the limit'
-extra_command 'update_core' 'Update the managed Mihomo core'
-extra_command 'rollback_core' 'Swap the active and previous Mihomo cores'
-extra_command 'delete_previous_core' 'Delete the previous Mihomo core'
+extra_command 'update_core' 'Start a managed Mihomo core update'
+extra_command 'delete_current_core' 'Delete the current downloaded Mihomo core'
 
 update_core() {
-	"$CORE_UPDATE_SH" update
+	"$CORE_UPDATE_SH" start-update
 }
 
-rollback_core() {
-	"$CORE_UPDATE_SH" rollback
-}
-
-delete_previous_core() {
-	"$CORE_UPDATE_SH" delete-previous
+delete_current_core() {
+	"$CORE_UPDATE_SH" delete-current
 }
 
 boot_func() {
@@ -141,7 +136,7 @@ start_service() {
 	# start
 	log "App" "Enabled."
 	log "App" "Start."
-	# migrate a package-provided legacy core into the managed active slot once.
+	# Prepare the managed core path and link a firmware-provided core when present.
 	[ -x "$CORE_UPDATE_SH" ] && "$CORE_UPDATE_SH" migrate >/dev/null 2>&1 || :
 	# check if executable
 	if [ ! -x "$PROG" ]; then

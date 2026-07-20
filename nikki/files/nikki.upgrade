@@ -5,4 +5,3 @@
 /etc/nikki/run/providers/proxy/
 /etc/nikki/core-update.state
 /usr/libexec/nikki/mihomo
-/usr/libexec/nikki/mihomo.prev

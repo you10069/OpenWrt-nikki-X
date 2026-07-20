@@ -2,60 +2,14 @@
 'require form';
 'require view';
 'require uci';
-'require rpc';
 'require poll';
 'require ui';
 'require tools.nikki as nikki';
 
-let coreUpdateSourceNotice = null;
-let coreUpdateDirty = false;
 let coreUpdateBusy = false;
 let coreUpdateLockedButtons = [];
-
-const callUciCommit = rpc.declare({
-    object: 'uci',
-    method: 'commit',
-    params: ['config'],
-    reject: true
-});
-
-const coreUpdateConfigOptions = [
-    'source_type',
-    'official_preset',
-    'repository_preset',
-    'repository_url',
-    'releases_url',
-    'releases_tag',
-    'direct_url',
-    'user_agent',
-    'timeout',
-    'retry',
-    'min_free_kb'
-];
-
-function renderDnsNotice() {
-    return E('div', {
-        class: 'nikki-dns-notice',
-        style: [
-            'margin:8px 0 18px',
-            'padding:12px 14px',
-            'border-left:4px solid #f0ad4e',
-            'border-radius:3px',
-            'background:rgba(240,173,78,0.08)',
-            'color:inherit'
-        ].join(';')
-    }, [
-        E('div', {
-            style: 'font-size:16px;font-weight:600;line-height:1.6;margin-bottom:4px;'
-        }, [_('To ensure accurate DNS queries and traffic routing:')]),
-        E('div', {
-            style: 'font-size:15px;line-height:1.8;overflow-wrap:anywhere;'
-        }, [
-            E('div', {}, [_('1. Manually disable: Network - Interfaces - DHCP/DNS - DNS Redirect')]),
-            E('div', {}, [_('2. Disable encrypted DNS / secure DNS in operating systems, browsers, and other software on computers and phones')])
-        ])
-    ]);
-}
+let coreUpdatePollTimer = null;
+let currentCoreInfo = {};
 
 function renderStatus(running) {
     return updateStatus(E('input', { id: 'core_status', style: 'border: unset; font-style: italic; font-weight: bold;', readonly: '' }), running);
@@ -74,20 +28,26 @@ function textOrDash(value) {
 }
 
 function coreStatusText(info) {
+    info = info || {};
     const labels = {
         idle: _('Not Checked'),
+        source_changed: _('Update source changed, not checked!'),
+        checking: _('Checking for updates, please wait.'),
         checked: _('Checked'),
-        updating: _('Updating'),
-        success: _('Update Successful'),
-        error: _('Update Failed'),
-        rolled_back: _('Rolled Back'),
-        previous_deleted: _('Previous Version Deleted')
+        updating: _('The first update or an update without a proxy may take longer. Refresh the page every 5 minutes.'),
+        success: _('Update Successful')
     };
+
+    if ((info.status === 'error' || info.status === 'core_deleted') && info.error) {
+        let errorText = info.error;
+        if (info.updated_at)
+            errorText += ` · ${info.updated_at}`;
+        return errorText;
+    }
+
     let text = labels[info.status] || textOrDash(info.status);
-    if (info.updated_at)
+    if (info.updated_at && !['checking', 'updating', 'source_changed'].includes(info.status))
         text += ` · ${info.updated_at}`;
-    if (info.error)
-        text += ` · ${info.error}`;
     return text;
 }
 
@@ -104,24 +64,12 @@ function renderInfoValue(value, wrapAnywhere, elementId) {
     return E('span', attributes, [textOrDash(value)]);
 }
 
-function updateSourceNotice(message) {
-    const element = document.getElementById('core_update_source');
-    if (element)
-        element.textContent = textOrDash(message);
-}
-
-function markCoreUpdateSaved() {
-    coreUpdateDirty = false;
-    coreUpdateSourceNotice = _('Configuration saved. Check for updates again.');
-    updateSourceNotice(coreUpdateSourceNotice);
-}
-
 function setCoreUpdateBusy(busy) {
     coreUpdateBusy = busy;
 
     if (busy) {
         coreUpdateLockedButtons = Array.prototype.map.call(
-            document.querySelectorAll('.nikki-core-update-button, .cbi-page-actions button'),
+            document.querySelectorAll('.nikki-core-update-button'),
             function (button) {
                 const state = { button: button, disabled: button.disabled };
                 button.disabled = true;
@@ -138,139 +86,15 @@ function setCoreUpdateBusy(busy) {
     coreUpdateLockedButtons = [];
 }
 
-function runExclusiveCoreUpdate(task) {
-    if (coreUpdateBusy)
-        return Promise.reject(new Error(_('Core operation failed')));
-
-    setCoreUpdateBusy(true);
-    return Promise.resolve().then(task).then(function (result) {
-        setCoreUpdateBusy(false);
-        return result;
-    }, function (error) {
-        setCoreUpdateBusy(false);
-        throw error;
-    });
-}
-
-function persistCoreUpdateConfig(section) {
-    section.map.checkDepends();
-    return section.parse()
-        .then(function () { return uci.save(); })
-        .then(function (changedConfigs) {
-            // Commit only the Nikki package directly. On OpenWrt 21.02,
-            // uci.apply() starts a rollback-protected transaction and resolves
-            // before its delayed confirmation completes. A second Save/Check
-            // during that window is rejected by rpcd as a configuration
-            // conflict. The core updater fields do not alter connectivity, so
-            // a package-scoped commit is both sufficient and race-free.
-            if (!Array.isArray(changedConfigs) || changedConfigs.indexOf('nikki') === -1)
-                return false;
-
-            return callUciCommit('nikki').then(function () { return true; });
-        })
-        .then(function (committed) {
-            markCoreUpdateSaved();
-            return committed;
-        });
-}
-
-function saveCoreUpdateConfig(section) {
-    return runExclusiveCoreUpdate(function () {
-        return persistCoreUpdateConfig(section);
-    }).then(function () {
-        ui.addNotification(null, E('p', {}, [_('Core update configuration saved.')]));
-    }).catch(function (error) {
-        ui.addNotification(null, E('p', {}, [error.message || String(error)]), 'danger');
-    });
-}
-
-function runCoreAction(action, event, successMessage, beforeAction) {
-    return runExclusiveCoreUpdate(function () {
-        const preparation = beforeAction ? beforeAction() : Promise.resolve();
-
-        return preparation.then(function () {
-            return nikki.coreAction(action);
-        }).then(function (result) {
-            if (!result?.success)
-                throw new Error(result?.error_message || result?.error || _('Core operation failed'));
-            ui.addNotification(null, E('p', {}, [successMessage]));
-            window.setTimeout(function () { window.location.reload(); }, 250);
-        });
-    }).catch(function (error) {
-        ui.addNotification(null, E('p', {}, [error.message || String(error)]), 'danger');
-    });
-}
-
-function actionButton(title, style, action, enabled, successMessage, beforeAction, elementId) {
-    const attributes = {
-        class: `cbi-button cbi-button-${style} nikki-core-update-button`,
-        disabled: enabled ? null : '',
-        click: function (event) {
-            event.preventDefault();
-            return runCoreAction(action, event, successMessage, beforeAction);
-        }
-    };
-
-    if (elementId)
-        attributes.id = elementId;
-
-    return E('button', attributes, [title]);
-}
-
-function saveButton(section) {
-    return E('button', {
-        class: 'cbi-button cbi-button-save nikki-core-update-button',
-        click: function (event) {
-            event.preventDefault();
-            return saveCoreUpdateConfig(section, event);
-        }
-    }, [_('Save Changes')]);
-}
-
-function isCoreUpdateConfigField(target) {
-    if (!target || typeof(target.closest) !== 'function')
-        return false;
-
-    const field = target.closest('[data-field]');
-    const fieldId = field?.getAttribute('data-field') || '';
-
-    return coreUpdateConfigOptions.some(function (option) {
-        return fieldId === `cbid.nikki.core_update.${option}`;
-    });
-}
-
-function trackCoreUpdateChanges(root) {
-    if (root._nikkiCoreUpdateTracking)
-        return;
-
-    const markDirty = function (event) {
-        if (!isCoreUpdateConfigField(event.target))
-            return;
-
-        coreUpdateDirty = true;
-        coreUpdateSourceNotice = _('Configuration changed. Save changes or check for updates again.');
-        updateSourceNotice(coreUpdateSourceNotice);
-    };
-
-    root.addEventListener('input', markDirty);
-    root.addEventListener('change', markDirty);
-    root._nikkiCoreUpdateTracking = true;
-}
-
 function updateCoreInfoValue(root, elementId, value) {
     const element = root.querySelector(`#${elementId}`);
     if (element)
         element.textContent = textOrDash(value);
 }
 
-function updateCoreInfoButton(root, elementId, enabled) {
-    const element = root.querySelector(`#${elementId}`);
-    if (element)
-        element.disabled = !enabled;
-}
-
 function updateCoreInfo(root, info) {
     info = info || {};
+    currentCoreInfo = info;
 
     const architecture = [info.architecture_uname, info.architecture_package]
         .filter(Boolean)
@@ -279,25 +103,137 @@ function updateCoreInfo(root, info) {
     updateCoreInfoValue(root, 'core_update_architecture', architecture);
     updateCoreInfoValue(root, 'core_update_current_version', info.current_version);
     updateCoreInfoValue(root, 'core_update_latest_version', info.latest_version);
-
-    if (!coreUpdateSourceNotice)
-        updateCoreInfoValue(root, 'core_update_source', info.source);
-
-    updateCoreInfoValue(root, 'core_update_file', info.resolved_asset);
-    updateCoreInfoValue(root, 'core_update_address', info.resolved_url);
+    updateCoreInfoValue(root, 'core_update_source', info.source);
     updateCoreInfoValue(root, 'core_update_status', coreStatusText(info));
-    updateCoreInfoValue(root, 'core_update_previous_version', info.previous_version);
-    updateCoreInfoButton(root, 'core_update_rollback_button', !!info.previous_version);
-    updateCoreInfoButton(root, 'core_update_delete_button', !!info.previous_version);
 }
 
-function loadCoreInfo(root) {
-    return L.resolveDefault(nikki.coreStatus(), {
-        status: 'error',
-        error: _('Core operation failed')
-    }).then(function (info) {
-        updateCoreInfo(root, info);
+function scheduleReload() {
+    window.setTimeout(function () { window.location.reload(); }, 250);
+}
+
+function stopCorePolling() {
+    if (coreUpdatePollTimer != null) {
+        window.clearTimeout(coreUpdatePollTimer);
+        coreUpdatePollTimer = null;
+    }
+}
+
+function pollCoreOperation(root) {
+    stopCorePolling();
+    coreUpdatePollTimer = window.setTimeout(function pollOnce() {
+        L.resolveDefault(nikki.coreStatus(), { status: 'error' }).then(function (info) {
+            updateCoreInfo(root, info);
+            if (info.status === 'checking' || info.status === 'updating') {
+                coreUpdatePollTimer = window.setTimeout(pollOnce, 1000);
+                return;
+            }
+            stopCorePolling();
+            scheduleReload();
+        });
+    }, 1000);
+}
+
+function runCheckAction(root) {
+    if (coreUpdateBusy)
+        return Promise.resolve();
+
+    setCoreUpdateBusy(true);
+    updateCoreInfoValue(root, 'core_update_status', _('Checking for updates, please wait.'));
+    return L.resolveDefault(nikki.coreAction('check'), { success: false }).then(function () {
+        scheduleReload();
+    }, function () {
+        scheduleReload();
     });
+}
+
+function runUpdateAction(root) {
+    if (coreUpdateBusy)
+        return Promise.resolve();
+
+    setCoreUpdateBusy(true);
+    updateCoreInfoValue(root, 'core_update_status', _('The first update or an update without a proxy may take longer. Refresh the page every 5 minutes.'));
+    return L.resolveDefault(nikki.coreAction('update'), { success: false }).then(function (result) {
+        if (!result?.success) {
+            scheduleReload();
+            return;
+        }
+        pollCoreOperation(root);
+    }, function () {
+        scheduleReload();
+    });
+}
+
+function runDeleteCurrent(root) {
+    if (coreUpdateBusy)
+        return Promise.resolve();
+
+    setCoreUpdateBusy(true);
+    return L.resolveDefault(nikki.coreAction('delete-current'), { success: false }).then(function () {
+        scheduleReload();
+    }, function () {
+        scheduleReload();
+    });
+}
+
+function showDeleteCurrentDialog(root) {
+    const info = currentCoreInfo || {};
+
+    if (info.core_origin === 'firmware') {
+        ui.showModal(_('Current Core'), [
+            E('p', {}, [_('The current core is built into the firmware and does not occupy writable space. Deleting it cannot free space for a core update.')]),
+            E('div', { class: 'right' }, [
+                E('button', {
+                    class: 'btn cbi-button',
+                    click: ui.hideModal
+                }, [_('Close')])
+            ])
+        ]);
+        return;
+    }
+
+    if (info.core_origin === 'none') {
+        ui.showModal(_('Current Core'), [
+            E('p', {}, [_('There is no current core to delete.')]),
+            E('div', { class: 'right' }, [
+                E('button', {
+                    class: 'btn cbi-button',
+                    click: ui.hideModal
+                }, [_('Close')])
+            ])
+        ]);
+        return;
+    }
+
+    ui.showModal(_('Confirm Core Deletion'), [
+        E('p', {}, [_('Are you sure you want to delete the current core?')]),
+        E('p', {}, [_('This operation stops Nikki and deletes the downloaded core to free writable space for another core update.')]),
+        E('div', { class: 'right' }, [
+            E('button', {
+                class: 'btn cbi-button',
+                click: ui.hideModal
+            }, [_('Cancel')]),
+            E('button', {
+                class: 'btn cbi-button-negative',
+                click: function () {
+                    ui.hideModal();
+                    return runDeleteCurrent(root);
+                }
+            }, [_('Confirm Delete')])
+        ])
+    ]);
+}
+
+function coreActionButton(title, style, handler, elementId) {
+    const attributes = {
+        class: `cbi-button cbi-button-${style} nikki-core-update-button`,
+        click: function (event) {
+            event.preventDefault();
+            return handler();
+        }
+    };
+    if (elementId)
+        attributes.id = elementId;
+    return E('button', attributes, [title]);
 }
 
 return view.extend({
@@ -306,23 +242,28 @@ return view.extend({
             uci.load('nikki'),
             nikki.version(),
             nikki.status(),
-            nikki.listProfiles()
+            nikki.listProfiles(),
+            nikki.coreStatus()
         ]);
     },
     render: function (data) {
         const subscriptions = uci.sections('nikki', 'subscription');
         const appVersion = data[1].app ?? '';
         const coreVersion = data[1].core ?? '';
-        const coreInfo = {};
+        const coreInfo = data[4] || {};
         const running = data[2];
         const profiles = data[3];
 
-        coreUpdateSourceNotice = null;
-        coreUpdateDirty = false;
+        currentCoreInfo = coreInfo;
 
         let m, s, o;
 
-        m = new form.Map('nikki', _('Nikki-X'));
+        m = new form.Map('nikki', _('Nikki-X'), E('div', {
+            style: 'font-size:15px;line-height:1.75;'
+        }, [
+            E('div', {}, [_('1. This software is completely free and open source, secure and lightweight. When disabled, it uses almost no memory except for the official core.')]),
+            E('div', {}, [_('2. For accurate DNS queries and routing and to prevent DNS leaks, disable encrypted DNS / secure DNS in operating systems, browsers, and other software on computers and phones.')])
+        ]));
 
         s = m.section(form.TableSection, 'status', _('Status'));
         s.anonymous = true;
@@ -396,11 +337,10 @@ return view.extend({
         o = s.option(form.Flag, 'core_only', _('Core Only'));
         o.rmempty = false;
 
-        s = m.section(form.NamedSection, 'core_update', 'core_update', _('Mihomo Core Update'));
-        const coreUpdateSection = s;
-        s.description = _('The active and previous cores are stored in two fixed slots. A downloaded core is validated before replacement; a failed restart restores both original slots.');
+        s = m.section(form.NamedSection, 'core_update', 'core_update', _('Core Update'));
+        s.description = E('span', { style: 'font-size:15px;line-height:1.7;' }, [_('After selecting an update source, be sure to click Save & Apply before checking for updates or updating the core!')]);
 
-        o = s.option(form.ListValue, 'source_type', _('Source Type'));
+        o = s.option(form.ListValue, 'source_type', _('Update Source Selection'));
         o.default = 'official';
         o.rmempty = false;
         o.value('official', _('MetaCubeX Official Latest Version'));
@@ -416,7 +356,7 @@ return view.extend({
         o.value('proxy', _('PROXY Acceleration (Recommended)'));
         o.value('proxynet', _('PROXYNET Acceleration'));
         o.value('github', _('GitHub Direct'));
-        o.description = _('Release metadata first uses the GitHub API directly for up to 10 seconds, then falls back to the PROXY service. Automatic downloads try PROXY, PROXYNET, and GitHub Direct in order.');
+        o.description = _('Automatic mode tries the official update sources in order. Please wait patiently.');
 
         o = s.option(form.ListValue, 'repository_preset', _('ShellCrash Source'));
         o.default = 'auto';
@@ -429,7 +369,7 @@ return view.extend({
         o.value('author_https', _('HTTPS Mirror'));
         o.value('author_http', _('HTTP Beta Source (Unsafe)'));
         o.value('custom', _('Custom ShellCrash-Compatible Repository'));
-        o.description = _('Automatic mode tries all four HTTPS sources and never falls back to the unencrypted HTTP beta source.');
+        o.description = _('Automatic mode tries the HTTPS sources in order and stops at the first available source.');
 
         o = s.option(form.Value, 'repository_url', _('Custom Repository Base URL'));
         o.placeholder = 'https://example.com';
@@ -444,41 +384,17 @@ return view.extend({
 
         o = s.option(form.Value, 'releases_tag', _('Release Tag'));
         o.default = 'latest';
-        o.placeholder = 'latest / v1.19.16';
+        o.placeholder = 'latest / v1.19.29';
         o.depends('source_type', 'release');
         o.rmempty = false;
 
         o = s.option(form.Value, 'direct_url', _('Exact Direct URL'));
-        o.placeholder = 'https://example.com/mihomo-linux-aarch64_cortex-a53.tar.gz';
+        o.placeholder = 'https://example.com/mihomo-linux-arm64-v1.19.29.gz';
         o.depends('source_type', 'direct');
         o.rmempty = false;
 
-        o = s.option(form.Value, 'user_agent', _('User Agent'));
-        o.default = 'nikki-core-updater';
-        o.rmempty = false;
-
-        o = s.option(form.Value, 'timeout', _('Download Timeout'));
-        o.datatype = 'range(1, 3600)';
-        o.default = '120';
-        o.rmempty = false;
-
-        o = s.option(form.Value, 'retry', _('Download Retry'));
-        o.datatype = 'uinteger';
-        o.default = '2';
-        o.rmempty = false;
-
-        o = s.option(form.Value, 'min_free_kb', _('Minimum Free Space'));
-        o.datatype = 'uinteger';
-        o.default = '32768';
-        o.rmempty = false;
-        o.description = _('In KiB. Insufficient storage returns an error without replacing either core slot.');
-
-        o = s.option(form.DummyValue, '_save_core_update', _('Save Changes'));
-        o.cfgvalue = function () { return saveButton(coreUpdateSection); };
-
-
         o = s.option(form.DummyValue, '_device_architecture', _('Device Architecture'));
-        o.cfgvalue = function () { return renderInfoValue(null, false, 'core_update_architecture'); };
+        o.cfgvalue = function () { return renderInfoValue(coreInfo.architecture_uname && coreInfo.architecture_package ? `${coreInfo.architecture_uname} / ${coreInfo.architecture_package}` : null, false, 'core_update_architecture'); };
 
         o = s.option(form.DummyValue, '_current_version', _('Current Version'));
         o.cfgvalue = function () { return renderInfoValue(coreInfo.current_version, false, 'core_update_current_version'); };
@@ -487,70 +403,27 @@ return view.extend({
         o.cfgvalue = function () { return renderInfoValue(coreInfo.latest_version, false, 'core_update_latest_version'); };
 
         o = s.option(form.DummyValue, '_update_source', _('Update Source'));
-        o.cfgvalue = function () {
-            return renderInfoValue(coreUpdateSourceNotice || coreInfo.source, true, 'core_update_source');
-        };
-
-        o = s.option(form.DummyValue, '_update_file', _('Update File'));
-        o.cfgvalue = function () { return renderInfoValue(coreInfo.resolved_asset, true, 'core_update_file'); };
-
-        o = s.option(form.DummyValue, '_update_address', _('Update Address'));
-        o.cfgvalue = function () { return renderInfoValue(coreInfo.resolved_url, true, 'core_update_address'); };
+        o.cfgvalue = function () { return renderInfoValue(coreInfo.source, true, 'core_update_source'); };
 
         o = s.option(form.DummyValue, '_update_status', _('Update Status'));
         o.cfgvalue = function () { return renderInfoValue(coreStatusText(coreInfo), true, 'core_update_status'); };
 
         o = s.option(form.DummyValue, '_check_update', _('Check Update'));
+        o.description = E('span', { style: 'font-size:14px;' }, [_('Be sure to click Save & Apply at the bottom right first!')]);
         o.cfgvalue = function () {
-            return actionButton(
-                _('Check Update'),
-                'action',
-                'check',
-                true,
-                _('Update source checked.'),
-                function () { return persistCoreUpdateConfig(coreUpdateSection); }
-            );
+            return coreActionButton(_('Check Update'), 'action', function () { return runCheckAction(document); }, 'core_update_check_button');
         };
 
         o = s.option(form.DummyValue, '_update_core', _('Update Core'));
+        o.description = E('span', { style: 'font-size:14px;' }, [_('Be sure to click Save & Apply at the bottom right first!')]);
         o.cfgvalue = function () {
-            return actionButton(
-                _('Update Core'),
-                'positive',
-                'update',
-                true,
-                _('Core updated successfully.'),
-                function () { return persistCoreUpdateConfig(coreUpdateSection); }
-            );
+            return coreActionButton(_('Update Core'), 'positive', function () { return runUpdateAction(document); }, 'core_update_update_button');
         };
 
-        o = s.option(form.DummyValue, '_saved_previous_version', _('Saved Previous Version'));
-        o.cfgvalue = function () { return renderInfoValue(coreInfo.previous_version, false, 'core_update_previous_version'); };
-
-        o = s.option(form.DummyValue, '_rollback_previous', _('Rollback to Previous Version'));
+        o = s.option(form.DummyValue, '_delete_current_core', _('Force Delete Current Core'));
+        o.description = _('If you have tried everything and truly cannot free enough space to update the core, delete the current core and try again.');
         o.cfgvalue = function () {
-            return actionButton(
-                _('Rollback to Previous Version'),
-                'action',
-                'rollback',
-                !!coreInfo.previous_version,
-                _('Core rollback completed.'),
-                null,
-                'core_update_rollback_button'
-            );
-        };
-
-        o = s.option(form.DummyValue, '_delete_previous', _('Delete Previous Version Now'));
-        o.cfgvalue = function () {
-            return actionButton(
-                _('Delete Previous Version Now'),
-                'negative',
-                'delete-previous',
-                !!coreInfo.previous_version,
-                _('Previous core deleted.'),
-                null,
-                'core_update_delete_button'
-            );
+            return coreActionButton(_('Force Delete Current Core'), 'negative', function () { return showDeleteCurrentDialog(document); }, 'core_update_delete_button');
         };
 
         s = m.section(form.NamedSection, 'procd', 'procd', _('procd Config'));
@@ -629,43 +502,14 @@ return view.extend({
         o.rmempty = false;
 
         return m.render().then(function (root) {
-            const notice = renderDnsNotice();
-            const heading = root.querySelector('h2');
-
-            if (heading?.parentNode)
-                heading.parentNode.insertBefore(notice, heading.nextSibling);
-            else
-                root.insertBefore(notice, root.firstChild);
-
-            trackCoreUpdateChanges(root);
-            window.setTimeout(function () {
-                loadCoreInfo(root);
-            }, 0);
+            updateCoreInfo(root, coreInfo);
+            if (coreInfo.status === 'checking' || coreInfo.status === 'updating') {
+                window.setTimeout(function () {
+                    setCoreUpdateBusy(true);
+                    pollCoreOperation(document);
+                }, 0);
+            }
             return root;
-        });
-    },
-    handleSave: function (event) {
-        const updateWasDirty = coreUpdateDirty;
-        const self = this;
-        return runExclusiveCoreUpdate(function () {
-            return self.super('handleSave', [event]);
-        }).then(function (result) {
-            if (updateWasDirty)
-                markCoreUpdateSaved();
-            return result;
-        });
-    },
-    handleSaveApply: function (event, mode) {
-        const updateWasDirty = coreUpdateDirty;
-        const self = this;
-        return runExclusiveCoreUpdate(function () {
-            return self.super('handleSave', [event]).then(function () {
-                return ui.changes.apply(mode === '0');
-            });
-        }).then(function (result) {
-            if (updateWasDirty)
-                markCoreUpdateSaved();
-            return result;
         });
     }
 });

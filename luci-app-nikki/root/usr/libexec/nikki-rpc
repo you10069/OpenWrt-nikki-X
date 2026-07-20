@@ -50,7 +50,11 @@ version() {
 		app="$(opkg list-installed luci-app-nikki 2>/dev/null | awk '{print $3; exit}')"
 	fi
 	if [ -x "$CORE_ACTIVE" ]; then
-		core="$("$CORE_ACTIVE" -v 2>/dev/null | sed -n 's/.*\(v[0-9][0-9A-Za-z._+-]*\).*/\1/p' | head -n 1)"
+		if command -v timeout >/dev/null 2>&1; then
+			core="$(timeout 10 "$CORE_ACTIVE" -v 2>/dev/null | sed -n 's/.*\(v[0-9][0-9A-Za-z._+-]*\).*/\1/p' | head -n 1)"
+		else
+			core="$("$CORE_ACTIVE" -v 2>/dev/null | sed -n 's/.*\(v[0-9][0-9A-Za-z._+-]*\).*/\1/p' | head -n 1)"
+		fi
 	fi
 	json_init
 	json_add_string app "$app"
@@ -66,7 +70,7 @@ add_core_status_fields() {
 	tab="$(printf '\t')"
 	while IFS="$tab" read -r key value; do
 		case "$key" in
-			architecture_uname|architecture_package|current_version|previous_version|latest_version|source|status|error|updated_at|resolved_url|resolved_asset|resolved_repository_base|active_path|previous_path)
+			architecture_uname|architecture_package|current_version|latest_version|source|status|error|updated_at|core_origin|core_size_bytes|active_path)
 				json_add_string "$key" "$value"
 				;;
 		esac
@@ -82,9 +86,14 @@ core_status() {
 }
 
 core_action() {
-	local action="$1" output rc error
-	case "$action" in check|update|rollback|delete-previous) ;; *) json_failure "invalid core action"; return 0 ;; esac
-	output="$("$CORE_UPDATER" "$action" 2>&1)"
+	local action="$1" updater_action output rc error
+	case "$action" in
+		check) updater_action=check ;;
+		update) updater_action=start-update ;;
+		delete-current) updater_action=delete-current ;;
+		*) json_failure "invalid core action"; return 0 ;;
+	esac
+	output="$("$CORE_UPDATER" "$updater_action" 2>&1)"
 	rc=$?
 	json_init
 	if [ "$rc" -eq 0 ]; then

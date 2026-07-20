@@ -1,3 +1,15 @@
+# Nikki Legacy changelog
+
+## 2026-07-20 · Single-core updater and LuCI interaction rebuild
+
+- Replaced the persistent two-slot updater with one managed core at `/usr/libexec/nikki/mihomo`; removed previous-version, rollback and delete-previous UI/RPC/backend functions.
+- Added direct generic architecture mapping and first-success probing for official and ShellCrash sources. ShellCrash now uses only `clash-linux-<arch>.tar.gz`.
+- Replaced configurable UA/timeout/retry/minimum-space fields with fixed backend timeouts, a five-minute background task limit and fixed disk/memory thresholds.
+- Changed updates to replace the active core first, then validate ELF architecture, executable/version output and service startup; failures delete the new core and leave an explicit no-core state.
+- Added firmware-core symlinking, force-delete confirmation, released-space reporting and a clear explanation when the core is built into read-only firmware.
+- Simplified the first-page notices, source/status rows and button interactions; source changes are detected by a saved source fingerprint and require Save & Apply.
+- Removed transient success/error notifications from check/update/delete actions and refreshed the page from persisted backend state.
+
 ## 2026-07-20 · Default proxy and TUN profile refresh (nikki r6 / luci r5)
 
 - Changed new-install proxy defaults to REDIRECT for IPv4/IPv6 TCP, TUN for IPv4/IPv6 UDP, and REDIRECT for IPv4/IPv6 DNS.

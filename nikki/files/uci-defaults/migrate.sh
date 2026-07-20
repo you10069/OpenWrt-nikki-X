@@ -289,7 +289,7 @@ uci -q delete nikki.proxy.ipv6_proxy
 uci -q delete nikki.proxy.ipv4_dns_hijack
 uci -q delete nikki.proxy.ipv6_dns_hijack
 
-# Nikki Legacy v5: managed Mihomo core updater and two core slots.
+# Nikki-X single-slot managed Mihomo core updater.
 section_core_update=$(uci -q get nikki.core_update); [ -z "$section_core_update" ] && {
 	uci set nikki.core_update=core_update
 	uci set nikki.core_update.source_type=official
@@ -300,10 +300,6 @@ section_core_update=$(uci -q get nikki.core_update); [ -z "$section_core_update"
 	uci set nikki.core_update.releases_url='https://github.com/MetaCubeX/mihomo/releases'
 	uci set nikki.core_update.releases_tag=latest
 	uci set nikki.core_update.direct_url=''
-	uci set nikki.core_update.user_agent=nikki-core-updater
-	uci set nikki.core_update.timeout=120
-	uci set nikki.core_update.retry=2
-	uci set nikki.core_update.min_free_kb=32768
 }
 
 core_update_official_preset=$(uci -q get nikki.core_update.official_preset)
@@ -320,6 +316,18 @@ if [ -z "$core_update_repository_preset" ]; then
 		uci set nikki.core_update.repository_preset=auto
 	fi
 fi
+
+# The single-slot updater uses fixed internal network and storage policies.
+# Remove obsolete user-configurable updater controls and old two-slot files.
+uci -q delete nikki.core_update.user_agent
+uci -q delete nikki.core_update.timeout
+uci -q delete nikki.core_update.retry
+uci -q delete nikki.core_update.min_free_kb
+rm -f \
+	/usr/libexec/nikki/mihomo.prev \
+	/usr/libexec/nikki/.mihomo.update.* \
+	/usr/libexec/nikki/.mihomo.rollback.* \
+	2>/dev/null || :
 
 [ -x "$CORE_UPDATE_SH" ] && "$CORE_UPDATE_SH" migrate >/dev/null 2>&1 || :
 

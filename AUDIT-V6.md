@@ -13,7 +13,7 @@ This audit cross-checked LuCI controls, UCI defaults and migration, RPC helper c
 - Default mixin generation: warning/rule/off, TUN disabled, DNS enabled at `[::]:1053`, optional overrides omitted.
 - Default firewall rendering: IPv4 TCP/UDP TPROXY, IPv6 TCP REDIRECT plus UDP TPROXY, and IPv4/IPv6 DNS REDIRECT to the Mihomo DNS listener on 1053.
 - Independent REDIRECT/TPROXY/TUN combinations, IPv4 DNS TPROXY, IPv6 TCP/DNS NAT REDIRECT, ACLs and policy routes.
-- Core update/check/rollback/delete, architecture matching, ShellCrash fallback, stale lock, insufficient/failed-restart recovery, both-slot preservation and safe archive extraction.
+- Core check/update/delete, generic architecture mapping, first-success source probing, fixed storage thresholds, post-replacement validation, delete-on-failure, firmware-core symlinking and safe archive extraction.
 - RPC controller wildcard normalization and transactional editor writes.
 - Translation completeness and LuCI menu target existence.
 
@@ -21,7 +21,7 @@ This audit cross-checked LuCI controls, UCI defaults and migration, RPC helper c
 
 1. Proxy-server nameserver-policy overwrite merged instead of replacing.
 2. A zero TUN polling interval could loop indefinitely.
-3. Failed core activation restored the active slot but could lose the previous slot.
+3. The updater was simplified to one managed core; failed post-install validation now deletes the candidate instead of maintaining rollback slots.
 4. Reapplying configuration could duplicate or retain stale cron entries.
 5. Legacy custom ShellCrash settings could display a different preset in LuCI.
 6. Migrated scheduled restart could be enabled without its default cron expression.

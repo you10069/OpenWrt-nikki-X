@@ -1152,9 +1152,6 @@ msgstr ""
 msgid "Current Running Version"
 msgstr ""
 
-msgid "Previous Version"
-msgstr ""
-
 msgid "Rollback"
 msgstr ""
 
@@ -1191,37 +1188,6 @@ msgstr ""
 msgid "Update Successful"
 msgstr ""
 
-msgid "Update Failed"
-msgstr ""
-
-msgid "Rolled Back"
-msgstr ""
-
-msgid "Previous Version Deleted"
-msgstr ""
-
-msgid "Core operation failed"
-msgstr ""
-
-msgid "Core rollback completed."
-msgstr ""
-
-msgid "Previous core deleted."
-msgstr ""
-
-msgid "Update source checked."
-msgstr ""
-
-msgid "Core updated successfully."
-msgstr ""
-
-msgid "Mihomo Core Update"
-msgstr ""
-
-
-msgid "Source Type"
-msgstr ""
-
 msgid "MetaCubeX Official Latest Version"
 msgstr ""
 
@@ -1243,18 +1209,6 @@ msgstr ""
 msgid "Release Tag"
 msgstr ""
 
-msgid "Download Timeout"
-msgstr ""
-
-msgid "Download Retry"
-msgstr ""
-
-msgid "Minimum Free Space"
-msgstr ""
-
-msgid "In KiB. Insufficient storage returns an error without replacing either core slot."
-msgstr ""
-
 msgid "ShellCrash Sources"
 msgstr ""
 
@@ -1264,12 +1218,8 @@ msgstr ""
 msgid "Automatic HTTPS Fallback (Recommended)"
 msgstr ""
 
-
 msgid "jsDelivr CDN"
 msgstr ""
-
-
-
 
 msgid "Official Download Source"
 msgstr ""
@@ -1295,7 +1245,6 @@ msgstr ""
 msgid "HTTP Beta Source (Unsafe)"
 msgstr ""
 
-
 msgid "Automatic mode tries all four HTTPS sources and never falls back to the unencrypted HTTP beta source."
 msgstr ""
 
@@ -1317,9 +1266,6 @@ msgstr ""
 msgid "TUN"
 msgstr ""
 
-msgid "The active and previous cores are stored in two fixed slots. A downloaded core is validated before replacement; a failed restart restores both original slots."
-msgstr ""
-
 msgid "Resolved Asset"
 msgstr ""
 
@@ -1330,33 +1276,6 @@ msgid "Current Version"
 msgstr ""
 
 msgid "Update Version"
-msgstr ""
-
-msgid "Update File"
-msgstr ""
-
-msgid "Update Address"
-msgstr ""
-
-msgid "Saved Previous Version"
-msgstr ""
-
-msgid "Rollback to Previous Version"
-msgstr ""
-
-msgid "Delete Previous Version Now"
-msgstr ""
-
-msgid "Save Changes"
-msgstr ""
-
-msgid "Configuration changed. Save changes or check for updates again."
-msgstr ""
-
-msgid "Configuration saved. Check for updates again."
-msgstr ""
-
-msgid "Core update configuration saved."
 msgstr ""
 
 msgid "Current Firewall"
@@ -1385,10 +1304,6 @@ msgid "To ensure accurate DNS queries and traffic routing:"
 msgstr ""
 
 #: applications/luci-app-nikki/htdocs/luci-static/resources/view/nikki/app.js
-msgid "1. Manually disable: Network - Interfaces - DHCP/DNS - DNS Redirect"
-msgstr ""
-
-#: applications/luci-app-nikki/htdocs/luci-static/resources/view/nikki/app.js
 msgid "2. Disable encrypted DNS / secure DNS in operating systems, browsers, and other software on computers and phones"
 msgstr ""
 
@@ -1398,4 +1313,92 @@ msgstr ""
 
 #: applications/luci-app-nikki/htdocs/luci-static/resources/view/nikki/proxy.js
 msgid "Experimental feature; not recommended."
+msgstr ""
+
+#: applications/luci-app-nikki/htdocs/luci-static/resources/view/nikki/app.js
+msgid "1. This software is completely free and open source, secure and lightweight. When disabled, it uses almost no memory except for the official core."
+msgstr ""
+
+#: applications/luci-app-nikki/htdocs/luci-static/resources/view/nikki/app.js
+msgid "2. For accurate DNS queries and routing and to prevent DNS leaks, disable encrypted DNS / secure DNS in operating systems, browsers, and other software on computers and phones."
+msgstr ""
+
+#: applications/luci-app-nikki/htdocs/luci-static/resources/view/nikki/app.js
+msgid "After selecting an update source, be sure to click Save & Apply before checking for updates or updating the core!"
+msgstr ""
+
+#: applications/luci-app-nikki/htdocs/luci-static/resources/view/nikki/app.js
+msgid "Are you sure you want to delete the current core?"
+msgstr ""
+
+#: applications/luci-app-nikki/htdocs/luci-static/resources/view/nikki/app.js
+msgid "Automatic mode tries the HTTPS sources in order and stops at the first available source."
+msgstr ""
+
+#: applications/luci-app-nikki/htdocs/luci-static/resources/view/nikki/app.js
+msgid "Automatic mode tries the official update sources in order. Please wait patiently."
+msgstr ""
+
+#: applications/luci-app-nikki/htdocs/luci-static/resources/view/nikki/app.js
+msgid "Be sure to click Save & Apply at the bottom right first!"
+msgstr ""
+
+#: applications/luci-app-nikki/htdocs/luci-static/resources/view/nikki/app.js
+msgid "Cancel"
+msgstr ""
+
+#: applications/luci-app-nikki/htdocs/luci-static/resources/view/nikki/app.js
+msgid "Checking for updates, please wait."
+msgstr ""
+
+#: applications/luci-app-nikki/htdocs/luci-static/resources/view/nikki/app.js
+msgid "Close"
+msgstr ""
+
+#: applications/luci-app-nikki/htdocs/luci-static/resources/view/nikki/app.js
+msgid "Confirm Core Deletion"
+msgstr ""
+
+#: applications/luci-app-nikki/htdocs/luci-static/resources/view/nikki/app.js
+msgid "Confirm Delete"
+msgstr ""
+
+#: applications/luci-app-nikki/htdocs/luci-static/resources/view/nikki/app.js
+msgid "Current Core"
+msgstr ""
+
+#: applications/luci-app-nikki/htdocs/luci-static/resources/view/nikki/app.js
+msgid "Force Delete Current Core"
+msgstr ""
+
+#: applications/luci-app-nikki/htdocs/luci-static/resources/view/nikki/app.js
+msgid "If you have tried everything and truly cannot free enough space to update the core, delete the current core and try again."
+msgstr ""
+
+#: applications/luci-app-nikki/htdocs/luci-static/resources/view/nikki/app.js
+msgid "Nikki-X"
+msgstr ""
+
+#: applications/luci-app-nikki/htdocs/luci-static/resources/view/nikki/app.js
+msgid "The current core is built into the firmware and does not occupy writable space. Deleting it cannot free space for a core update."
+msgstr ""
+
+#: applications/luci-app-nikki/htdocs/luci-static/resources/view/nikki/app.js
+msgid "The first update or an update without a proxy may take longer. Refresh the page every 5 minutes."
+msgstr ""
+
+#: applications/luci-app-nikki/htdocs/luci-static/resources/view/nikki/app.js
+msgid "There is no current core to delete."
+msgstr ""
+
+#: applications/luci-app-nikki/htdocs/luci-static/resources/view/nikki/app.js
+msgid "This operation stops Nikki and deletes the downloaded core to free writable space for another core update."
+msgstr ""
+
+#: applications/luci-app-nikki/htdocs/luci-static/resources/view/nikki/app.js
+msgid "Update Source Selection"
+msgstr ""
+
+#: applications/luci-app-nikki/htdocs/luci-static/resources/view/nikki/app.js
+msgid "Update source changed, not checked!"
 msgstr ""

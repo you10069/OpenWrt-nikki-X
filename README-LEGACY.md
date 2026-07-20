@@ -1,8 +1,8 @@
-# Nikki Legacy v5: OpenWrt 21.02 / firewall3 / xtables
+# Nikki Legacy v6: OpenWrt 21.02 / firewall3 / xtables
 
 This is an experimental legacy fork of [OpenWrt-nikki](https://github.com/nikkinikki-org/OpenWrt-nikki). It targets OpenWrt 21.02-class systems using firewall3, iptables and ip6tables, without runtime dependencies on ucode, firewall4 or nftables.
 
-Legacy v5 preserves the Legacy v4 transparent-proxy data plane and adds managed Mihomo core updates. It does not redesign the v4 firewall rules.
+Legacy v6 preserves the transparent-proxy data plane and rebuilds the Mihomo updater around one managed core, fixed storage thresholds and a background update task.
 
 ## Transparent-proxy mode matrix
 
@@ -36,47 +36,28 @@ Implemented data-plane features:
 
 Not implemented yet: cgroup ACLs, advanced multi-WAN policy integration, ICMP TUN forwarding and full hardware regression coverage.
 
-## V5 managed core updater
+## V6 single-core updater
 
-Nikki no longer requires a virtual `mihomo` package at package-install time. The service always runs the managed active slot:
-
-```text
-Active:   /usr/libexec/nikki/mihomo
-Previous: /usr/libexec/nikki/mihomo.prev
-```
-
-On first start, a legacy executable at `/usr/libexec/mihomo` or `/usr/bin/mihomo` is copied into the active slot when the active slot is empty.
-
-Available sources:
-
-1. **Official MetaCubeX Releases** — queries the latest release and selects an architecture-compatible asset. Download choices are automatic HTTPS fallback, PROXY acceleration, PROXYNET acceleration, or the direct GitHub link. Release metadata first uses the GitHub API directly for up to 10 seconds and then falls back to `gh-proxy.com`. Automatic asset download tries `gh-proxy.com`, `ghproxy.net`, and the direct GitHub URL in that order.
-2. **ShellCrash sources** — choose automatic HTTPS fallback, JSdelivr CF, standard jsDelivr CDN, the direct GitHub link, the HTTPS mirror, the HTTP beta source, or a custom compatible repository.
-3. **Custom Releases URL + tag** — uses `latest` or an exact tag such as `v1.19.16`.
-4. **Exact direct URL** — downloads the configured URL verbatim and never appends or rewrites its path.
-
-Automatic ShellCrash mode tries only the four encrypted HTTPS sources. The legacy HTTP beta source is listed for old TLS-incompatible devices but must be selected manually.
-
-Asset discovery prefers `mihomo-linux-*` before `clash-linux-*`. Architecture candidates are tried from the package-specific target toward generic aliases, for example:
+Nikki uses one active path:
 
 ```text
-aarch64_cortex-a53
-→ aarch64-cortex-a53
-→ aarch64
-→ arm64
+/usr/libexec/nikki/mihomo
 ```
 
-Update safety:
+There is no persistent previous slot, manual rollback, or automatic rollback. Once the fixed space conditions are satisfied, a requested update replaces the active core. The installed file is then checked for ELF architecture compatibility, made executable, run with `mihomo -v`, and required to yield a version. Any failure removes the candidate and leaves Nikki without a managed core.
 
-- accepts upgrades, downgrades and same-version replacement;
-- validates archive layout, streams only the selected tar member, and checks executable size plus `mihomo -v` output before installation;
-- checks temporary and core-filesystem free space before replacing either slot;
-- copies the current active core into the previous slot, then activates the validated candidate;
-- restores both pre-update core slots when a running service cannot restart with the candidate;
-- supports one-click rollback by swapping the two slots;
-- supports deleting only the previous slot;
-- preserves both slots and updater state through sysupgrade.
+A firmware-provided `/usr/libexec/mihomo` or `/usr/bin/mihomo` is exposed through a symlink instead of being copied into overlay, so it consumes no writable core storage.
 
-LuCI displays the detected architecture, current running version, previous version, checked/latest version, selected source, resolved asset/download URL and last operation status. Updates run directly after the button is pressed; insufficient storage returns an error without opening a confirmation dialog or replacing either slot.
+Sources:
+
+1. **MetaCubeX official latest release** — GitHub API direct for up to 10 seconds, then the API through `gh-proxy.com`. OpenWrt targets map directly to generic Go release architectures. Automatic asset probing tries PROXY, PROXYNET, and GitHub Direct in order, with 5 seconds per URL and stops at the first success.
+2. **ShellCrash sources** — uses only `bin/version` and `bin/meta/clash-linux-<arch>.tar.gz`. Automatic mode tries JSdelivr CF, jsDelivr CDN, the HTTPS mirror, and GitHub Direct in order, stopping at the first successful 5-second probe.
+3. **Custom Releases URL + tag** — uses the mapped generic architecture filename.
+4. **Exact direct URL** — probes and downloads the configured URL verbatim.
+
+Storage policy is fixed in the backend. With no current core, at least 50 MiB of writable storage is required; 70 MiB selects disk download, while 50–70 MiB requires more than 25 MiB available in `/tmp`/memory. With a current core, the operation is allowed when either writable storage or memory has at least 20 MiB; disk download is selected at 30 MiB or above, otherwise `/tmp` is used when memory permits. Available memory is the smaller of `MemAvailable` and `/tmp` free space. Background updates have a hard five-minute limit.
+
+LuCI requires source changes to be committed with **Save & Apply**. Check/update operations do not overwrite the source display or show transient notifications. A source fingerprint clears the checked version and reports that the source has changed. The force-delete action confirms before deleting a downloaded core, reports the released MiB, and explains that a firmware symlink does not occupy writable space.
 
 ## Chain names
 
@@ -163,13 +144,13 @@ A modern Go feed may still be needed if you choose to compile a Mihomo package o
 /etc/nikki/scripts/core_update.sh architectures
 /etc/nikki/scripts/core_update.sh check
 /etc/nikki/scripts/core_update.sh update
-/etc/nikki/scripts/core_update.sh rollback
-/etc/nikki/scripts/core_update.sh delete-previous
+/etc/nikki/scripts/core_update.sh start-update
+/etc/nikki/scripts/core_update.sh delete-current
 ```
 
 ## Validation status
 
-`./tests/run-tests.sh` covers shell/JavaScript/JSON static checks, simulated UCI/ubus mixin generation, independent mode combinations, IPv4/IPv6 rule rendering, IPv6 TCP REDIRECT, IPv4 DNS TPROXY, TUN chains and restore calls. DNS-only TPROXY/TUN tests verify that no unintended NAT/REDIRECT rules are generated. Core-updater simulations cover the official API fallback and all official download presets, exact direct URLs, ShellCrash-compatible repository paths, architecture ordering, update/rollback/delete and restart-failure recovery.
+`./tests/run-tests.sh` covers shell/JavaScript/JSON static checks, simulated UCI/ubus mixin generation, independent mode combinations, IPv4/IPv6 rule rendering, IPv6 TCP REDIRECT, IPv4 DNS TPROXY, TUN chains and restore calls. DNS-only TPROXY/TUN tests verify that no unintended NAT/REDIRECT rules are generated. Core-updater simulations cover official API fallback and first-success probing, exact direct URLs, fixed ShellCrash paths, generic architecture mapping, single-core replacement, post-install validation, delete-on-failure, current-core deletion and service-start failure handling.
 
 This source has not yet completed a full build in a real OpenWrt 21.02 SDK or physical-router traffic regression testing.
 

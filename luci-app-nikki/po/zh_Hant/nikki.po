@@ -1159,9 +1159,6 @@ msgstr "裝置架構"
 msgid "Current Running Version"
 msgstr "目前執行版本"
 
-msgid "Previous Version"
-msgstr "上一版本"
-
 msgid "Rollback"
 msgstr "回退"
 
@@ -1198,39 +1195,8 @@ msgstr "更新中"
 msgid "Update Successful"
 msgstr "更新成功"
 
-msgid "Update Failed"
-msgstr "更新失敗"
-
-msgid "Rolled Back"
-msgstr "已回退"
-
-msgid "Previous Version Deleted"
-msgstr "上一版本已刪除"
-
-msgid "Core operation failed"
-msgstr "核心操作失敗"
-
-msgid "Core rollback completed."
-msgstr "核心回退完成。"
-
-msgid "Previous core deleted."
-msgstr "上一版本核心已刪除。"
-
-msgid "Update source checked."
-msgstr "更新來源檢查完成。"
-
-msgid "Core updated successfully."
-msgstr "核心更新成功。"
-
-msgid "Mihomo Core Update"
-msgstr "Mihomo 核心更新"
-
-
-msgid "Source Type"
-msgstr "更新來源類型"
-
 msgid "MetaCubeX Official Latest Version"
-msgstr "MetaCubeX 官方 最新版本"
+msgstr "MetaCubeX 官方最新發布"
 
 msgid "Custom ShellCrash-Compatible Repository"
 msgstr "自訂 ShellCrash 相容倉庫"
@@ -1250,18 +1216,6 @@ msgstr "Releases 位址"
 msgid "Release Tag"
 msgstr "Tag 標籤"
 
-msgid "Download Timeout"
-msgstr "下載逾時"
-
-msgid "Download Retry"
-msgstr "下載重試次數"
-
-msgid "Minimum Free Space"
-msgstr "最低可用空間"
-
-msgid "In KiB. Insufficient storage returns an error without replacing either core slot."
-msgstr "單位為 KiB。空間不足時僅回傳錯誤，不替換任何核心槽位。"
-
 msgid "ShellCrash Sources"
 msgstr "ShellCrash 來源"
 
@@ -1271,12 +1225,8 @@ msgstr "ShellCrash 來源"
 msgid "Automatic HTTPS Fallback (Recommended)"
 msgstr "自動 HTTPS 回退（推薦）"
 
-
 msgid "jsDelivr CDN"
 msgstr "jsDelivr CDN"
-
-
-
 
 msgid "Official Download Source"
 msgstr "MetaCubeX 官方下載源"
@@ -1302,7 +1252,6 @@ msgstr "HTTPS 鏡像"
 msgid "HTTP Beta Source (Unsafe)"
 msgstr "HTTP 內測源（不安全）"
 
-
 msgid "Automatic mode tries all four HTTPS sources and never falls back to the unencrypted HTTP beta source."
 msgstr "自動模式依次嘗試四個 HTTPS 來源，絕不會回退到未加密的 HTTP 內測來源。"
 
@@ -1324,9 +1273,6 @@ msgstr "TPROXY"
 msgid "TUN"
 msgstr "TUN"
 
-msgid "The active and previous cores are stored in two fixed slots. A downloaded core is validated before replacement; a failed restart restores both original slots."
-msgstr "目前核心和上一版本核心儲存在兩個固定槽位中。下載的核心會在替換前驗證；若服務重新啟動失敗，將還原原本的兩個槽位。"
-
 msgid "Resolved Asset"
 msgstr "已匹配檔案"
 
@@ -1338,33 +1284,6 @@ msgstr "目前版本"
 
 msgid "Update Version"
 msgstr "更新版本"
-
-msgid "Update File"
-msgstr "更新檔案"
-
-msgid "Update Address"
-msgstr "更新位址"
-
-msgid "Saved Previous Version"
-msgstr "已儲存的上一個版本"
-
-msgid "Rollback to Previous Version"
-msgstr "回退到上一個版本"
-
-msgid "Delete Previous Version Now"
-msgstr "立即刪除上一個版本"
-
-msgid "Save Changes"
-msgstr "儲存修改"
-
-msgid "Configuration changed. Save changes or check for updates again."
-msgstr "設定已修改，請儲存修改或重新檢查更新"
-
-msgid "Configuration saved. Check for updates again."
-msgstr "設定已儲存，請重新檢查更新"
-
-msgid "Core update configuration saved."
-msgstr "核心更新設定已儲存。"
 
 msgid "Current Firewall"
 msgstr "目前防火牆"
@@ -1392,10 +1311,6 @@ msgid "To ensure accurate DNS queries and traffic routing:"
 msgstr "為了準確進行 DNS 查詢和分流："
 
 #: applications/luci-app-nikki/htdocs/luci-static/resources/view/nikki/app.js
-msgid "1. Manually disable: Network - Interfaces - DHCP/DNS - DNS Redirect"
-msgstr "1、請手動關掉：網路 - 介面 - DHCP/DNS - DNS 重新導向"
-
-#: applications/luci-app-nikki/htdocs/luci-static/resources/view/nikki/app.js
 msgid "2. Disable encrypted DNS / secure DNS in operating systems, browsers, and other software on computers and phones"
 msgstr "2、電腦、手機等請關掉系統和瀏覽器等軟體的加密 DNS/安全 DNS"
 
@@ -1406,3 +1321,91 @@ msgstr "如果您不知道自己在做什麼，請勿隨意修改本頁任何設
 #: applications/luci-app-nikki/htdocs/luci-static/resources/view/nikki/proxy.js
 msgid "Experimental feature; not recommended."
 msgstr "實驗性功能，不建議啟用。"
+
+#: applications/luci-app-nikki/htdocs/luci-static/resources/view/nikki/app.js
+msgid "1. This software is completely free and open source, secure and lightweight. When disabled, it uses almost no memory except for the official core."
+msgstr "1、本軟體完全免費開源、安全且輕量，停用後，除了官方核心，幾乎不佔用任何記憶體"
+
+#: applications/luci-app-nikki/htdocs/luci-static/resources/view/nikki/app.js
+msgid "2. For accurate DNS queries and routing and to prevent DNS leaks, disable encrypted DNS / secure DNS in operating systems, browsers, and other software on computers and phones."
+msgstr "2、為了準確進行 DNS 查詢與分流並防止 DNS 洩漏，請關閉電腦、手機作業系統、瀏覽器及其他軟體的加密 DNS／安全 DNS"
+
+#: applications/luci-app-nikki/htdocs/luci-static/resources/view/nikki/app.js
+msgid "After selecting an update source, be sure to click Save & Apply before checking for updates or updating the core!"
+msgstr "選擇更新源後，請務必先按一下儲存並套用，再檢查更新和更新核心！"
+
+#: applications/luci-app-nikki/htdocs/luci-static/resources/view/nikki/app.js
+msgid "Are you sure you want to delete the current core?"
+msgstr "確定刪除目前核心嗎？"
+
+#: applications/luci-app-nikki/htdocs/luci-static/resources/view/nikki/app.js
+msgid "Automatic mode tries the HTTPS sources in order and stops at the first available source."
+msgstr "自動模式會依序嘗試 HTTPS 更新源，第一個可用源成功後即停止探測。"
+
+#: applications/luci-app-nikki/htdocs/luci-static/resources/view/nikki/app.js
+msgid "Automatic mode tries the official update sources in order. Please wait patiently."
+msgstr "自動模式會依序嘗試官方更新源，請耐心等候。"
+
+#: applications/luci-app-nikki/htdocs/luci-static/resources/view/nikki/app.js
+msgid "Be sure to click Save & Apply at the bottom right first!"
+msgstr "請務必先到最底部右下角按一下儲存並套用！"
+
+#: applications/luci-app-nikki/htdocs/luci-static/resources/view/nikki/app.js
+msgid "Cancel"
+msgstr "取消"
+
+#: applications/luci-app-nikki/htdocs/luci-static/resources/view/nikki/app.js
+msgid "Checking for updates, please wait."
+msgstr "正在檢查更新，請耐心等候。"
+
+#: applications/luci-app-nikki/htdocs/luci-static/resources/view/nikki/app.js
+msgid "Close"
+msgstr "關閉"
+
+#: applications/luci-app-nikki/htdocs/luci-static/resources/view/nikki/app.js
+msgid "Confirm Core Deletion"
+msgstr "確認刪除目前核心"
+
+#: applications/luci-app-nikki/htdocs/luci-static/resources/view/nikki/app.js
+msgid "Confirm Delete"
+msgstr "確認刪除"
+
+#: applications/luci-app-nikki/htdocs/luci-static/resources/view/nikki/app.js
+msgid "Current Core"
+msgstr "目前核心"
+
+#: applications/luci-app-nikki/htdocs/luci-static/resources/view/nikki/app.js
+msgid "Force Delete Current Core"
+msgstr "強制刪除目前核心"
+
+#: applications/luci-app-nikki/htdocs/luci-static/resources/view/nikki/app.js
+msgid "If you have tried everything and truly cannot free enough space to update the core, delete the current core and try again."
+msgstr "如果您已嘗試各種方法，仍無法騰出足夠空間更新核心，請刪除目前核心後再試一次。"
+
+#: applications/luci-app-nikki/htdocs/luci-static/resources/view/nikki/app.js
+msgid "Nikki-X"
+msgstr "Nikki-X"
+
+#: applications/luci-app-nikki/htdocs/luci-static/resources/view/nikki/app.js
+msgid "The current core is built into the firmware and does not occupy writable space. Deleting it cannot free space for a core update."
+msgstr "目前為韌體內建核心，不佔用可寫入空間，無法藉由刪除釋放更新空間"
+
+#: applications/luci-app-nikki/htdocs/luci-static/resources/view/nikki/app.js
+msgid "The first update or an update without a proxy may take longer. Refresh the page every 5 minutes."
+msgstr "首次更新或未啟用代理時，更新時間較長，請每 5 分鐘重新整理頁面"
+
+#: applications/luci-app-nikki/htdocs/luci-static/resources/view/nikki/app.js
+msgid "There is no current core to delete."
+msgstr "目前沒有可刪除的核心"
+
+#: applications/luci-app-nikki/htdocs/luci-static/resources/view/nikki/app.js
+msgid "This operation stops Nikki and deletes the downloaded core to free writable space for another core update."
+msgstr "此操作將停止 Nikki，並刪除目前下載的核心，以釋放空間供再次更新核心。"
+
+#: applications/luci-app-nikki/htdocs/luci-static/resources/view/nikki/app.js
+msgid "Update Source Selection"
+msgstr "更新源"
+
+#: applications/luci-app-nikki/htdocs/luci-static/resources/view/nikki/app.js
+msgid "Update source changed, not checked!"
+msgstr "已切換更新源，尚未檢查更新！"

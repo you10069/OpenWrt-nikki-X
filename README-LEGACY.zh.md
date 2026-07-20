@@ -1,8 +1,8 @@
-# Nikki Legacy v5：OpenWrt 21.02 / firewall3 / xtables
+# Nikki Legacy v6：OpenWrt 21.02 / firewall3 / xtables
 
 这是基于 [OpenWrt-nikki](https://github.com/nikkinikki-org/OpenWrt-nikki) 改造的实验性 legacy 分支，目标是在 **OpenWrt 21.02 类系统、firewall3、iptables 和 ip6tables** 环境中运行，同时移除运行时 `ucode`、`firewall4` 和 nftables 依赖。
 
-**Legacy v5 完整保留 v4 的透明代理数据面，只新增 Mihomo 内核管理与更新能力，不重做 v4 的防火墙规则。**
+**Legacy v6 保留透明代理数据面，并将 Mihomo 更新器重构为单内核、固定空间策略和后台更新任务。**
 
 ## 透明代理模式矩阵
 
@@ -39,85 +39,52 @@ IPv6 TCP 和 DNS REDIRECT 使用 `ip6tables nat` 表，并依赖 `ip6tables-mod-
 
 暂未实现：cgroup ACL、多 WAN 深度集成、ICMP TUN 转发及正式发布级实体设备回归测试。
 
-## V5 Mihomo 内核更新
+## V6 内核更新
 
-### 两个固定槽位
+### 单一活动内核
 
-Nikki 软件包不再强制依赖虚拟包 `mihomo`。服务固定运行受管理的当前槽位：
-
-```text
-当前运行：/usr/libexec/nikki/mihomo
-上一版本：/usr/libexec/nikki/mihomo.prev
-```
-
-首次启动时，如果当前槽位为空，但系统中存在旧软件包提供的 `/usr/libexec/mihomo` 或 `/usr/bin/mihomo`，会先复制到当前槽位，便于从旧安装平滑迁移。
-
-只保留当前和上一版本，不建立无限历史版本目录。
-
-### 四种更新源
-
-1. **MetaCubeX 官方 Releases**：查询官方最新 Release，并选择适配本机架构的资产。下载源可选择自动 HTTPS 回退、PROXY 加速、PROXYNET 加速或 GitHub 直链。版本查询先直连 GitHub API，最多等待 10 秒，失败后通过 `gh-proxy.com` 查询；自动下载依次尝试 `gh-proxy.com`、`ghproxy.net` 和 GitHub 直链。
-2. **ShellCrash 源**：可选择自动 HTTPS 回退、JSdelivr CF、jsDelivr CDN、GitHub 直链、HTTPS 镜像、HTTP 内测源（不安全），或自定义兼容仓库。
-3. **自定义 Releases 地址 + Tag**：填写 Releases 根地址；Tag 默认 `latest`，也可填写 `v1.19.16` 等任意指定版本。
-4. **精确直链**：完整 URL 原样下载，不自动拼接、改写路径或替换参数。
-
-ShellCrash 自动模式只轮询四个 HTTPS 源。旧设备 HTTP 内测源仅作为手动选项提供，不会进入自动回退。
-
-ShellCrash 兼容仓库首先尝试：
+Nikki 固定使用：
 
 ```text
-<仓库根地址>/bin/meta/mihomo-linux-<架构>.<压缩格式>
-<仓库根地址>/bin/meta/clash-linux-<架构>.<压缩格式>
+/usr/libexec/nikki/mihomo
 ```
 
-之后才尝试兼容回退目录。
+更新器不再建立 `mihomo.prev`，也不提供上一版本、手动回退或自动回滚。用户发起更新并满足固定空间条件后，旧内核不再作为保护对象；新文件直接替换活动路径，随后执行 ELF 架构校验、`chmod 0755`、`mihomo -v` 和版本提取。任一验证失败都会删除新内核并进入无内核状态。
 
-### 文件名与架构匹配顺序
+如果固件内置 `/usr/libexec/mihomo` 或 `/usr/bin/mihomo`，Nikki 会在活动路径为空时建立软链接，不复制大文件到 overlay。此类固件核心不占用可写空间。
 
-文件名前缀固定优先：
+### 更新源
 
-```text
-mihomo-linux-
-clash-linux-
-```
+1. **MetaCubeX 官方最新发布**：官方 API 直连最多等待 10 秒，失败后通过 `gh-proxy.com` 查询。设备架构直接映射到官方通用 Go 架构；自动下载按 PROXY、PROXYNET、GitHub 直链顺序探测，每个连接最多 5 秒，首个成功即停止。
+2. **ShellCrash 源**：固定使用 `bin/version` 和 `bin/meta/clash-linux-<架构>.tar.gz`。自动模式按 JSdelivr CF、jsDelivr CDN、HTTPS 镜像、GitHub 直链顺序探测，每个连接最多 5 秒，首个成功即停止。
+3. **自定义 Releases 地址 + Tag**：使用固定的通用架构文件名。
+4. **精确直链**：完整 URL 原样探测和下载。
 
-架构从具体到通用查找。例如设备的软件包架构为 `aarch64_cortex-a53` 时：
+OpenWrt 的 `aarch64_cortex-a53`、`aarch64_cortex-a72` 等目标统一映射为 `arm64`；x86_64 使用 `amd64-compatible`。不再探测具体 CPU target、多前缀、多压缩后缀或历史目录组合。
 
-```text
-aarch64_cortex-a53
-→ aarch64-cortex-a53
-→ aarch64
-→ arm64
-```
+### 固定空间策略
 
-同时参考软件包管理器架构和 `uname -m`，避免只依赖一个粗粒度架构名称。
+没有当前内核时：
 
-### 更新、回退与安全策略
+- 硬盘小于 50 MiB：拒绝更新；
+- 硬盘大于等于 70 MiB：下载到内核目录；
+- 硬盘 50～70 MiB 且可用内存大于 25 MiB：下载到 `/tmp`；
+- 其他情况：空间不足。
 
-- 不比较版本新旧：升级、降级、同版本覆盖均可执行；
-- 下载完成后先识别 raw、`.gz`、`.tar.gz` 或 `.tgz`；tar 包只流式读取被选中的核心成员，不整体解包；
-- 安装前校验文件大小、可执行权限及 `mihomo -v` 输出；
-- 更新前检查临时目录和内核目录空间；
-- 空间不足直接返回“空间不足，自行释放空间后重试”，不覆盖任一槽位；
-- 更新时先把当前核心复制为上一版本，再启用已验证的新核心；
-- 如果 Nikki 原本正在运行，而新核心导致服务重启失败，会恢复更新前的当前槽位和上一版本槽位，并尝试恢复服务；
-- “回退”交换当前与上一槽位，因此回退后仍可再次切回；
-- “删除上一版本”只删除 `mihomo.prev`，不影响当前核心；
-- sysupgrade 保留两个槽位和 `/etc/nikki/core-update.state`。
+已有当前内核时：
 
-LuCI 状态页显示：
+- 硬盘和内存都小于 20 MiB：空间不足；
+- 任意一个大于等于 20 MiB：允许更新；
+- 硬盘大于等于 30 MiB：下载到内核目录；
+- 否则在内存满足 20 MiB 时下载到 `/tmp`；必要时先删除旧核心以释放空间。
 
-```text
-设备架构
-当前运行版本
-上一版本（回退 / 删除）
-最新或目标版本
-更新源
-实际匹配文件和下载地址
-更新状态与错误信息
-```
+可用内存取 `MemAvailable` 与 `/tmp` 可用空间中的较小值。后台更新任务最长运行 5 分钟。
 
-空间充足时点击“更新内核”直接执行，不弹确认框。
+### LuCI 交互
+
+修改更新源后必须先点击页面底部的“保存并应用”。来源指纹变化后，页面显示“已切换更新源，未检查更新！”。检查或更新期间不弹出临时通知，按钮保持锁定，并通过状态轮询在完成后刷新页面。
+
+“强行删除当前内核”用于释放下载核心占用的 overlay 空间。删除普通下载核心后显示实际释放的 MiB；固件内置软链接不会被视为可释放空间，并提示无法通过删除它获得更新空间。
 
 ## DNS 路径
 
@@ -314,8 +281,8 @@ Network → mihomo-meta 或 mihomo-alpha
 /etc/nikki/scripts/core_update.sh architectures
 /etc/nikki/scripts/core_update.sh check
 /etc/nikki/scripts/core_update.sh update
-/etc/nikki/scripts/core_update.sh rollback
-/etc/nikki/scripts/core_update.sh delete-previous
+/etc/nikki/scripts/core_update.sh start-update
+/etc/nikki/scripts/core_update.sh delete-current
 
 iptables-save | grep NIK_
 ip6tables-save | grep NIK_
@@ -350,8 +317,8 @@ NIK_NAT_OUT_TCP_V6
 - 覆盖 IPv4 TCP REDIRECT/TPROXY、IPv6 TCP REDIRECT、IPv4 DNS TPROXY、IPv4/IPv6 TUN、IPv4/IPv6 DNS-only TUN、IPv6 DNS-only REDIRECT/TPROXY；
 - 覆盖 TUN mangle/filter 链和 restore 调用；
 - IPv6 DNS REDIRECT 测试会验证 nat/REDIRECT 规则，DNS-only TPROXY/TUN 模式则不会生成非预期 NAT 规则；
-- 覆盖官方 API 回退和四种官方下载源、精确直链不拼接、ShellCrash 兼容目录、具体到通用架构顺序；
-- 覆盖更新、上一版本保留、回退、删除以及重启失败恢复；
+- 覆盖官方 API 回退、官方顺序探测首个成功、精确直链和 ShellCrash 固定文件路径；
+- 覆盖单内核强制替换、覆盖后验证、验证失败删除、当前内核删除和服务启动失败处理；
 - 尚未在真实 OpenWrt 21.02 SDK 中完成完整编译，也未在实体路由器上执行真实流量回归测试。
 
 建议先在具备串口救援或容易恢复固件的设备上测试。
