@@ -1,3 +1,13 @@
+## 2026-07-20 · IPv6 TCP REDIRECT and IPv4 DNS TPROXY (nikki r4)
+
+- Added IPv6 TCP REDIRECT for LAN and router-originated traffic through ip6tables nat chains, using the existing Mihomo Redirect Port/Listener.
+- Added IPv4 DNS TPROXY for TCP/UDP port 53, including LAN interception, router OUTPUT marking, loopback reinjection and IPv4 policy routing.
+- Restored the original shared-mode migration semantics for IPv6 TCP/UDP and changed the new-install IPv6 TCP default to REDIRECT.
+- Kept named Redirect Listener address handling unchanged; only listener presence and port are validated.
+- Ensured router-only TPROXY still hooks PREROUTING for loopback reinjection when LAN proxying is disabled.
+- Added focused firewall rendering and migration regression tests.
+- Bumped the nikki package release to r4 and luci-app-nikki to r3.
+
 ## 2026-07-18 · Proxy page-level safety notice (r10)
 
 - Moved the general safety warning from the proxy form section to the native LuCI page description under the main Proxy Config title.

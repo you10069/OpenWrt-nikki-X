@@ -64,8 +64,8 @@ load_legacy_proxy_modes() {
 		config_get_bool old_dns6 proxy ipv6_dns_hijack 0
 		[ "$old_v4" -eq 1 ] && ipv4_tcp_mode="$old_tcp" || ipv4_tcp_mode=disable
 		[ "$old_v4" -eq 1 ] && ipv4_udp_mode="$old_udp" || ipv4_udp_mode=disable
-		[ "$old_v6" -eq 1 ] && ipv6_tcp_mode=tproxy || ipv6_tcp_mode=disable
-		[ "$old_v6" -eq 1 ] && ipv6_udp_mode=tproxy || ipv6_udp_mode=disable
+		[ "$old_v6" -eq 1 ] && ipv6_tcp_mode="$old_tcp" || ipv6_tcp_mode=disable
+		[ "$old_v6" -eq 1 ] && ipv6_udp_mode="$old_udp" || ipv6_udp_mode=disable
 		[ "$old_dns4" -eq 1 ] && ipv4_dns_mode=redirect || ipv4_dns_mode=disable
 		[ "$old_dns6" -eq 1 ] && ipv6_dns_mode=redirect || ipv6_dns_mode=disable
 	fi
@@ -80,9 +80,9 @@ load_legacy_proxy_modes() {
 legacy_modes_valid() {
 	case "$ipv4_tcp_mode" in disable|redirect|tproxy|tun) ;; *) return 1 ;; esac
 	case "$ipv4_udp_mode" in disable|tproxy|tun) ;; *) return 1 ;; esac
-	case "$ipv6_tcp_mode" in disable|tproxy|tun) ;; *) return 1 ;; esac
+	case "$ipv6_tcp_mode" in disable|redirect|tproxy|tun) ;; *) return 1 ;; esac
 	case "$ipv6_udp_mode" in disable|tproxy|tun) ;; *) return 1 ;; esac
-	case "$ipv4_dns_mode" in disable|redirect|tun) ;; *) return 1 ;; esac
+	case "$ipv4_dns_mode" in disable|redirect|tproxy|tun) ;; *) return 1 ;; esac
 	case "$ipv6_dns_mode" in disable|redirect|tproxy|tun) ;; *) return 1 ;; esac
 }
 
@@ -429,19 +429,28 @@ start_service() {
 				return
 			fi
 		fi
-		if [ "$ipv4_tcp_mode" = redirect ]; then
+		if [ "$ipv4_tcp_mode" = redirect ] || [ "$ipv6_tcp_mode" = redirect ]; then
 			if REDIRECT_LISTENER="$redirect_listener_name" run_yq -M -e '(has("redir-port") or (has("listeners") and .listeners | any_c(.name == env(REDIRECT_LISTENER) and .type == "redir"))) | not' "$RUN_PROFILE_PATH" > /dev/null 2>&1; then
 				log "Profile" "Check failed."
-				log "Profile" "IPv4 TCP REDIRECT requires a Redirect Port/Listener."
+				log "Profile" "Selected TCP REDIRECT modes require a Redirect Port/Listener."
 				log "App" "Exit."
 				return
 			fi
 		fi
-		if [ "$ipv4_tcp_mode" = tproxy ] || [ "$ipv4_udp_mode" = tproxy ] || \
+		if [ "$ipv4_tcp_mode" = tproxy ] || [ "$ipv4_udp_mode" = tproxy ] || [ "$ipv4_dns_mode" = tproxy ] || \
 		   [ "$ipv6_tcp_mode" = tproxy ] || [ "$ipv6_udp_mode" = tproxy ] || [ "$ipv6_dns_mode" = tproxy ]; then
 			if TPROXY_LISTENER="$tproxy_listener_name" run_yq -M -e '(has("tproxy-port") or (has("listeners") and .listeners | any_c(.name == env(TPROXY_LISTENER) and .type == "tproxy"))) | not' "$RUN_PROFILE_PATH" > /dev/null 2>&1; then
 				log "Profile" "Check failed."
 				log "Profile" "Selected TPROXY modes require a TPROXY Port/Listener."
+				log "App" "Exit."
+				return
+			fi
+		fi
+		if [ "$ipv4_udp_mode" = tproxy ] || [ "$ipv4_dns_mode" = tproxy ] || \
+		   [ "$ipv6_udp_mode" = tproxy ] || [ "$ipv6_dns_mode" = tproxy ]; then
+			if TPROXY_LISTENER="$tproxy_listener_name" run_yq -M -e '((has("tproxy-port") | not) and (has("listeners") and (.listeners | any_c(.name == env(TPROXY_LISTENER) and .type == "tproxy" and .udp == false))))' "$RUN_PROFILE_PATH" > /dev/null 2>&1; then
+				log "Profile" "Check failed."
+				log "Profile" "Selected UDP or DNS TPROXY modes require UDP support on the named TPROXY listener."
 				log "App" "Exit."
 				return
 			fi
@@ -550,7 +559,7 @@ service_started() {
 
 	local ipv4_tproxy_active ipv6_tproxy_active ipv4_tun_active ipv6_tun_active
 	ipv4_tproxy_active=0; ipv6_tproxy_active=0; ipv4_tun_active=0; ipv6_tun_active=0
-	if [ "$ipv4_tcp_mode" = tproxy ] || [ "$ipv4_udp_mode" = tproxy ]; then ipv4_tproxy_active=1; fi
+	if [ "$ipv4_tcp_mode" = tproxy ] || [ "$ipv4_udp_mode" = tproxy ] || [ "$ipv4_dns_mode" = tproxy ]; then ipv4_tproxy_active=1; fi
 	if [ "$ipv6_tcp_mode" = tproxy ] || [ "$ipv6_udp_mode" = tproxy ] || [ "$ipv6_dns_mode" = tproxy ]; then ipv6_tproxy_active=1; fi
 	if [ "$ipv4_tcp_mode" = tun ] || [ "$ipv4_udp_mode" = tun ] || [ "$ipv4_dns_mode" = tun ]; then ipv4_tun_active=1; fi
 	if [ "$ipv6_tcp_mode" = tun ] || [ "$ipv6_udp_mode" = tun ] || [ "$ipv6_dns_mode" = tun ]; then ipv6_tun_active=1; fi

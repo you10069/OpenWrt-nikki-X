@@ -1153,8 +1153,8 @@ msgstr "TUN 设备等待超时"
 msgid "TUN Device Check Interval"
 msgstr "TUN 设备检查间隔"
 
-msgid "REDIRECT TCP/UDP port 53 to the Mihomo DNS listener, or route it through TUN while preserving the original destination."
-msgstr "将 TCP/UDP 53 端口重定向到 Mihomo DNS 监听端口，或在保留原始目标地址的情况下通过 TUN 路由。"
+msgid "REDIRECT TCP/UDP port 53 to the Mihomo DNS listener, TPROXY it to the Mihomo TPROXY listener, or route it through TUN while preserving the original destination."
+msgstr "将 TCP/UDP 53 端口 REDIRECT 到 Mihomo DNS 监听端口、TPROXY 到 Mihomo TPROXY 监听端口，或在保留原始目标地址的情况下通过 TUN 路由。"
 
 msgid "REDIRECT TCP/UDP port 53 to the dual-stack Mihomo DNS listener, TPROXY it to the Mihomo TPROXY listener, or route it through TUN while preserving the original destination."
 msgstr "将 TCP/UDP 53 端口 REDIRECT 到双栈 Mihomo DNS 监听端口、TPROXY 到 Mihomo TPROXY 监听端口，或在保留原始目标地址的情况下通过 TUN 路由。"

@@ -262,14 +262,14 @@ if [ -z "$legacy_ipv4_tcp_mode" ]; then
 
 	[ "$old_ipv4_proxy" = 1 ] && uci set nikki.proxy.ipv4_tcp_mode="$old_tcp_mode" || uci set nikki.proxy.ipv4_tcp_mode=disable
 	[ "$old_ipv4_proxy" = 1 ] && uci set nikki.proxy.ipv4_udp_mode="$old_udp_mode" || uci set nikki.proxy.ipv4_udp_mode=disable
-	[ "$old_ipv6_proxy" = 1 ] && uci set nikki.proxy.ipv6_tcp_mode=tproxy || uci set nikki.proxy.ipv6_tcp_mode=disable
-	[ "$old_ipv6_proxy" = 1 ] && uci set nikki.proxy.ipv6_udp_mode=tproxy || uci set nikki.proxy.ipv6_udp_mode=disable
+	[ "$old_ipv6_proxy" = 1 ] && uci set nikki.proxy.ipv6_tcp_mode="$old_tcp_mode" || uci set nikki.proxy.ipv6_tcp_mode=disable
+	[ "$old_ipv6_proxy" = 1 ] && uci set nikki.proxy.ipv6_udp_mode="$old_udp_mode" || uci set nikki.proxy.ipv6_udp_mode=disable
 	[ "$old_ipv4_dns" = 1 ] && uci set nikki.proxy.ipv4_dns_mode=redirect || uci set nikki.proxy.ipv4_dns_mode=disable
 	[ "$old_ipv6_dns" = 1 ] && uci set nikki.proxy.ipv6_dns_mode=redirect || uci set nikki.proxy.ipv6_dns_mode=disable
 fi
 
 [ -n "$(uci -q get nikki.proxy.ipv4_udp_mode)" ] || uci set nikki.proxy.ipv4_udp_mode=tproxy
-[ -n "$(uci -q get nikki.proxy.ipv6_tcp_mode)" ] || uci set nikki.proxy.ipv6_tcp_mode=tproxy
+[ -n "$(uci -q get nikki.proxy.ipv6_tcp_mode)" ] || uci set nikki.proxy.ipv6_tcp_mode=redirect
 [ -n "$(uci -q get nikki.proxy.ipv6_udp_mode)" ] || uci set nikki.proxy.ipv6_udp_mode=tproxy
 [ -n "$(uci -q get nikki.proxy.ipv4_dns_mode)" ] || uci set nikki.proxy.ipv4_dns_mode=redirect
 [ -n "$(uci -q get nikki.proxy.ipv6_dns_mode)" ] || uci set nikki.proxy.ipv6_dns_mode=redirect

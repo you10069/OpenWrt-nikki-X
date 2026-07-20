@@ -10,19 +10,19 @@ Legacy v5 preserves the Legacy v4 transparent-proxy data plane and adds managed 
 |---|---|
 | IPv4 TCP | Disable / REDIRECT / TPROXY / TUN |
 | IPv4 UDP | Disable / TPROXY / TUN |
-| IPv6 TCP | Disable / TPROXY / TUN |
+| IPv6 TCP | Disable / REDIRECT / TPROXY / TUN |
 | IPv6 UDP | Disable / TPROXY / TUN |
-| IPv4 DNS TCP/UDP 53 | Disable / REDIRECT to Mihomo `dns.listen` / TUN |
+| IPv4 DNS TCP/UDP 53 | Disable / REDIRECT to Mihomo `dns.listen` / TPROXY to Mihomo `tproxy-port` / TUN |
 | IPv6 DNS TCP/UDP 53 | Disable / REDIRECT to Mihomo `dns.listen` / TPROXY to Mihomo `tproxy-port` / TUN |
 
-IPv6 DNS REDIRECT uses the ip6tables nat table and requires `ip6tables-mod-nat`. The default Mihomo DNS listener is dual-stack: `[::]:1053`.
+IPv6 TCP and DNS REDIRECT use the ip6tables nat table and require `ip6tables-mod-nat`. The default Mihomo DNS listener is dual-stack: `[::]:1053`.
 
 Implemented data-plane features:
 
 - independent IPv4/IPv6 TCP and UDP mode selection;
 - IPv4 TCP REDIRECT and TCP/UDP TPROXY;
-- IPv6 TCP/UDP TPROXY;
-- IPv4 DNS REDIRECT to the Mihomo DNS listener, or routing through TUN;
+- IPv6 TCP REDIRECT and TCP/UDP TPROXY;
+- IPv4 DNS REDIRECT to the Mihomo DNS listener, interception through the Mihomo TPROXY listener, or routing through TUN;
 - IPv6 DNS REDIRECT to the Mihomo DNS listener, interception through the Mihomo TPROXY listener, or routing through TUN;
 - IPv4/IPv6 TUN routing using a dedicated fwmark and policy-routing table;
 - TUN INPUT and FORWARD acceptance chains for both families;
@@ -98,7 +98,9 @@ NIK_FLT_FWD_TUN_V4
 
 IPv6 nat:
 NIK_NAT_PRE_DNS_V6
+NIK_NAT_PRE_TCP_V6
 NIK_NAT_OUT_DNS_V6
+NIK_NAT_OUT_TCP_V6
 
 IPv6 mangle/filter:
 NIK_MGL_PRE_CTRL_V6
@@ -115,6 +117,7 @@ NIK_FLT_FWD_TUN_V6
 ```text
 IPv4 DNS:
 TCP/UDP 53 -> nat REDIRECT -> Mihomo dns.listen
+or TCP/UDP 53 -> mangle TPROXY -> Mihomo tproxy-port
 or TCP/UDP 53 -> TUN mark -> dedicated route table -> Mihomo TUN device
 
 IPv6 DNS:
@@ -166,7 +169,7 @@ A modern Go feed may still be needed if you choose to compile a Mihomo package o
 
 ## Validation status
 
-`./tests/run-tests.sh` covers shell/JavaScript/JSON static checks, simulated UCI/ubus mixin generation, independent mode combinations, IPv4/IPv6 rule rendering, TUN chains and restore calls. Tests reject every IPv6 nat/REDIRECT rule. Core-updater simulations cover exact direct URLs, ShellCrash-compatible repository paths, architecture ordering, update/rollback/delete and restart-failure recovery.
+`./tests/run-tests.sh` covers shell/JavaScript/JSON static checks, simulated UCI/ubus mixin generation, independent mode combinations, IPv4/IPv6 rule rendering, IPv6 TCP REDIRECT, IPv4 DNS TPROXY, TUN chains and restore calls. DNS-only TPROXY/TUN tests verify that no unintended NAT/REDIRECT rules are generated. Core-updater simulations cover exact direct URLs, ShellCrash-compatible repository paths, architecture ordering, update/rollback/delete and restart-failure recovery.
 
 This source has not yet completed a full build in a real OpenWrt 21.02 SDK or physical-router traffic regression testing.
 

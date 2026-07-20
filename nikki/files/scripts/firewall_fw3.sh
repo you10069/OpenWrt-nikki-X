@@ -4,8 +4,9 @@
 # Data plane:
 # - IPv4 TCP: disabled / REDIRECT / TPROXY / TUN.
 # - IPv4 UDP: disabled / TPROXY / TUN.
-# - IPv6 TCP/UDP: disabled / TPROXY / TUN.
-# - IPv4 DNS: REDIRECT to Mihomo dns.listen, or route through TUN.
+# - IPv6 TCP: disabled / REDIRECT / TPROXY / TUN.
+# - IPv6 UDP: disabled / TPROXY / TUN.
+# - IPv4 DNS: REDIRECT to Mihomo dns.listen, TPROXY, or route through TUN.
 # - IPv6 DNS: REDIRECT to Mihomo dns.listen, TPROXY, or route through TUN.
 
 . /lib/functions.sh
@@ -29,7 +30,9 @@ NAT_OUT_DNS_V4="NIK_NAT_OUT_DNS_V4"
 NAT_OUT_TCP_V4="NIK_NAT_OUT_TCP_V4"
 
 NAT_PRE_DNS_V6="NIK_NAT_PRE_DNS_V6"
+NAT_PRE_TCP_V6="NIK_NAT_PRE_TCP_V6"
 NAT_OUT_DNS_V6="NIK_NAT_OUT_DNS_V6"
+NAT_OUT_TCP_V6="NIK_NAT_OUT_TCP_V6"
 
 MGL_PRE_CTRL_V4="NIK_MGL_PRE_CTRL_V4"
 MGL_PRE_TPROXY_V4="NIK_MGL_PRE_TPROXY_V4"
@@ -100,7 +103,7 @@ load_runtime_endpoints() {
 	config_get tproxy_listener core tproxy_listener_name tproxy-in
 	config_get tun_listener core tun_listener_name tun-in
 
-	if mode_is "$IPV4_TCP_MODE" redirect; then
+	if mode_is "$IPV4_TCP_MODE" redirect || mode_is "$IPV6_TCP_MODE" redirect; then
 		REDIR_PORT="$(REDIRECT_LISTENER="$redirect_listener" yq -M -r '."redir-port" // (.listeners[]? | select(.name == env(REDIRECT_LISTENER) and .type == "redir") | .port) // ""' "$RUN_PROFILE_PATH" </dev/null 2>/dev/null)"
 		valid_port "$REDIR_PORT" || return 1
 	fi
@@ -241,13 +244,15 @@ remove_ipv4_rules() {
 
 remove_ipv6_rules() {
 	remove_jump "$IPT6" nat PREROUTING "$NAT_PRE_DNS_V6"
+	remove_jump "$IPT6" nat PREROUTING "$NAT_PRE_TCP_V6"
 	remove_jump "$IPT6" nat OUTPUT "$NAT_OUT_DNS_V6"
+	remove_jump "$IPT6" nat OUTPUT "$NAT_OUT_TCP_V6"
 	remove_jump "$IPT6" mangle PREROUTING "$MGL_PRE_CTRL_V6"
 	remove_jump "$IPT6" mangle OUTPUT "$MGL_OUT_MARK_V6"
 	remove_jump "$IPT6" mangle OUTPUT "$MGL_OUT_TUN_V6"
 	remove_jump "$IPT6" filter INPUT "$FLT_IN_TUN_V6"
 	remove_jump "$IPT6" filter FORWARD "$FLT_FWD_TUN_V6"
-	for chain in "$NAT_PRE_DNS_V6" "$NAT_OUT_DNS_V6"; do remove_chain "$IPT6" nat "$chain"; done
+	for chain in "$NAT_PRE_DNS_V6" "$NAT_PRE_TCP_V6" "$NAT_OUT_DNS_V6" "$NAT_OUT_TCP_V6"; do remove_chain "$IPT6" nat "$chain"; done
 	for chain in "$MGL_PRE_CTRL_V6" "$MGL_PRE_TPROXY_V6" "$MGL_PRE_TUN_V6" "$MGL_OUT_MARK_V6" "$MGL_OUT_TUN_V6"; do remove_chain "$IPT6" mangle "$chain"; done
 	for chain in "$FLT_IN_TUN_V6" "$FLT_FWD_TUN_V6"; do remove_chain "$IPT6" filter "$chain"; done
 }
@@ -469,7 +474,7 @@ select_ipv4_context() {
 }
 select_ipv6_context() {
 	RULES_FILE="$RULES_FILE_V6"
-	NAT_PRE_DNS="$NAT_PRE_DNS_V6"; NAT_OUT_DNS="$NAT_OUT_DNS_V6"
+	NAT_PRE_DNS="$NAT_PRE_DNS_V6"; NAT_PRE_TCP="$NAT_PRE_TCP_V6"; NAT_OUT_DNS="$NAT_OUT_DNS_V6"; NAT_OUT_TCP="$NAT_OUT_TCP_V6"
 	MGL_PRE_CTRL="$MGL_PRE_CTRL_V6"; MGL_PRE_TPROXY="$MGL_PRE_TPROXY_V6"; MGL_PRE_TUN="$MGL_PRE_TUN_V6"; MGL_OUT_MARK="$MGL_OUT_MARK_V6"; MGL_OUT_TUN="$MGL_OUT_TUN_V6"
 	FLT_IN_TUN="$FLT_IN_TUN_V6"; FLT_FWD_TUN="$FLT_FWD_TUN_V6"
 	SET_RESERVED="$SET_RESERVED_V6"; SET_CHINA="$SET_CHINA_V6"; BYPASS_CHINA="$BYPASS_CHINA_V6"
@@ -527,19 +532,20 @@ generate_ipv4_rules() {
 	EOF_MGL
 	FAMILY_TUN_ACTIVE="$TUN_ACTIVE_V4"
 	if [ "$TPROXY_ACTIVE_V4" -eq 1 ] || [ "$TUN_ACTIVE_V4" -eq 1 ]; then
-		[ "$LAN_PROXY_ENABLED" -eq 1 ] && rule "-I PREROUTING 1 -j $MGL_PRE_CTRL"
+		if [ "$LAN_PROXY_ENABLED" -eq 1 ] || { [ "$ROUTER_PROXY" -eq 1 ] && [ "$TPROXY_ACTIVE_V4" -eq 1 ]; }; then rule "-I PREROUTING 1 -j $MGL_PRE_CTRL"; fi
 		# Emit TUN first and TPROXY second: repeated -I 1 leaves TPROXY ahead.
 		[ "$ROUTER_PROXY" -eq 1 ] && [ "$TUN_ACTIVE_V4" -eq 1 ] && rule "-I OUTPUT 1 -j $MGL_OUT_TUN"
 		[ "$ROUTER_PROXY" -eq 1 ] && [ "$TPROXY_ACTIVE_V4" -eq 1 ] && rule "-I OUTPUT 1 -j $MGL_OUT_MARK"
-		mode_is "$IPV4_TCP_MODE" tproxy && rule "-A $MGL_PRE_TPROXY -p tcp -j TPROXY --on-port $TPROXY_PORT --tproxy-mark $TPROXY_MARK/$TPROXY_MASK"
-		mode_is "$IPV4_UDP_MODE" tproxy && rule "-A $MGL_PRE_TPROXY -p udp -j TPROXY --on-port $TPROXY_PORT --tproxy-mark $TPROXY_MARK/$TPROXY_MASK"
+		if mode_is "$IPV4_TCP_MODE" tproxy || mode_is "$IPV4_DNS_MODE" tproxy; then rule "-A $MGL_PRE_TPROXY -p tcp -j TPROXY --on-port $TPROXY_PORT --tproxy-mark $TPROXY_MARK/$TPROXY_MASK"; fi
+		if mode_is "$IPV4_UDP_MODE" tproxy || mode_is "$IPV4_DNS_MODE" tproxy; then rule "-A $MGL_PRE_TPROXY -p udp -j TPROXY --on-port $TPROXY_PORT --tproxy-mark $TPROXY_MARK/$TPROXY_MASK"; fi
 		if [ "$TUN_ACTIVE_V4" -eq 1 ]; then rule "-A $MGL_PRE_TUN -j MARK --set-xmark $TUN_MARK/$TUN_MASK"; rule "-A $MGL_PRE_TUN -j RETURN"; fi
 		if [ "$ROUTER_PROXY" -eq 1 ] && [ "$TPROXY_ACTIVE_V4" -eq 1 ]; then
-			mode_is "$IPV4_TCP_MODE" tproxy && rule "-A $MGL_PRE_CTRL -i lo -p tcp -m mark --mark $TPROXY_MARK/$TPROXY_MASK -j $MGL_PRE_TPROXY"
-			mode_is "$IPV4_UDP_MODE" tproxy && rule "-A $MGL_PRE_CTRL -i lo -p udp -m mark --mark $TPROXY_MARK/$TPROXY_MASK -j $MGL_PRE_TPROXY"
+			if mode_is "$IPV4_TCP_MODE" tproxy || mode_is "$IPV4_DNS_MODE" tproxy; then rule "-A $MGL_PRE_CTRL -i lo -p tcp -m mark --mark $TPROXY_MARK/$TPROXY_MASK -j $MGL_PRE_TPROXY"; fi
+			if mode_is "$IPV4_UDP_MODE" tproxy || mode_is "$IPV4_DNS_MODE" tproxy; then rule "-A $MGL_PRE_CTRL -i lo -p udp -m mark --mark $TPROXY_MARK/$TPROXY_MASK -j $MGL_PRE_TPROXY"; fi
 		fi
 		if [ "$LAN_PROXY_ENABLED" -eq 1 ]; then
 			for dev in $LAN_DEVICES; do
+				mode_is "$IPV4_DNS_MODE" tproxy && emit_lan_acl "$MGL_PRE_CTRL" "$dev" dns_tproxy
 				mode_is "$IPV4_DNS_MODE" tun && emit_lan_acl "$MGL_PRE_CTRL" "$dev" dns_tun
 				case "$IPV4_TCP_MODE" in
 					tproxy) emit_common_bypass "$MGL_PRE_CTRL" "-i $dev -p tcp"; normalize_port_tokens "$PROXY_TCP_DPORT"; emit_lan_acl "$MGL_PRE_CTRL" "$dev" tcp_tproxy ;;
@@ -554,6 +560,7 @@ generate_ipv4_rules() {
 		if [ "$ROUTER_PROXY" -eq 1 ]; then
 			if [ "$TPROXY_ACTIVE_V4" -eq 1 ]; then
 				rule "-A $MGL_OUT_MARK -m mark --mark $CORE_MARK/$CORE_MASK -j RETURN"
+				mode_is "$IPV4_DNS_MODE" tproxy && emit_router_acl "$MGL_OUT_MARK" dns_tproxy
 				case "$IPV4_TCP_MODE" in tproxy) emit_common_bypass "$MGL_OUT_MARK" "-p tcp"; normalize_port_tokens "$PROXY_TCP_DPORT"; emit_router_acl "$MGL_OUT_MARK" tcp_tproxy ;; esac
 				case "$IPV4_UDP_MODE" in tproxy) emit_common_bypass "$MGL_OUT_MARK" "-p udp"; normalize_port_tokens "$PROXY_UDP_DPORT"; emit_router_acl "$MGL_OUT_MARK" udp_tproxy ;; esac
 			fi
@@ -571,20 +578,27 @@ generate_ipv4_rules() {
 
 generate_ipv6_rules() {
 	select_ipv6_context; : > "$RULES_FILE"
-	if mode_is "$IPV6_DNS_MODE" redirect; then
+	if mode_is "$IPV6_DNS_MODE" redirect || mode_is "$IPV6_TCP_MODE" redirect; then
 		cat >> "$RULES_FILE" <<-EOF_NAT
 		*nat
 		:$NAT_PRE_DNS - [0:0]
+		:$NAT_PRE_TCP - [0:0]
 		:$NAT_OUT_DNS - [0:0]
+		:$NAT_OUT_TCP - [0:0]
 		EOF_NAT
-		[ "$LAN_PROXY_ENABLED" -eq 1 ] && rule "-I PREROUTING 1 -j $NAT_PRE_DNS"
-		[ "$ROUTER_PROXY" -eq 1 ] && rule "-I OUTPUT 1 -j $NAT_OUT_DNS"
+		[ "$LAN_PROXY_ENABLED" -eq 1 ] && mode_is "$IPV6_TCP_MODE" redirect && rule "-I PREROUTING 1 -j $NAT_PRE_TCP"
+		[ "$LAN_PROXY_ENABLED" -eq 1 ] && mode_is "$IPV6_DNS_MODE" redirect && rule "-I PREROUTING 1 -j $NAT_PRE_DNS"
+		[ "$ROUTER_PROXY" -eq 1 ] && mode_is "$IPV6_TCP_MODE" redirect && rule "-I OUTPUT 1 -j $NAT_OUT_TCP"
+		[ "$ROUTER_PROXY" -eq 1 ] && mode_is "$IPV6_DNS_MODE" redirect && rule "-I OUTPUT 1 -j $NAT_OUT_DNS"
 		if [ "$LAN_PROXY_ENABLED" -eq 1 ]; then
-			for dev in $LAN_DEVICES; do emit_lan_acl "$NAT_PRE_DNS" "$dev" dns_redirect; done
+			for dev in $LAN_DEVICES; do
+				mode_is "$IPV6_DNS_MODE" redirect && emit_lan_acl "$NAT_PRE_DNS" "$dev" dns_redirect
+				if mode_is "$IPV6_TCP_MODE" redirect; then emit_common_bypass "$NAT_PRE_TCP" "-i $dev -p tcp"; normalize_port_tokens "$PROXY_TCP_DPORT"; emit_lan_acl "$NAT_PRE_TCP" "$dev" tcp_redirect; fi
+			done
 		fi
 		if [ "$ROUTER_PROXY" -eq 1 ]; then
-			rule "-A $NAT_OUT_DNS -m mark --mark $CORE_MARK/$CORE_MASK -j RETURN"
-			emit_router_acl "$NAT_OUT_DNS" dns_redirect
+			if mode_is "$IPV6_DNS_MODE" redirect; then rule "-A $NAT_OUT_DNS -m mark --mark $CORE_MARK/$CORE_MASK -j RETURN"; emit_router_acl "$NAT_OUT_DNS" dns_redirect; fi
+			if mode_is "$IPV6_TCP_MODE" redirect; then emit_common_bypass "$NAT_OUT_TCP" "-p tcp"; normalize_port_tokens "$PROXY_TCP_DPORT"; emit_router_acl "$NAT_OUT_TCP" tcp_redirect; fi
 		fi
 		rule COMMIT
 	fi
@@ -599,7 +613,7 @@ generate_ipv6_rules() {
 	EOF_MGL
 	FAMILY_TUN_ACTIVE="$TUN_ACTIVE_V6"
 	if [ "$TPROXY_ACTIVE_V6" -eq 1 ] || [ "$TUN_ACTIVE_V6" -eq 1 ]; then
-		[ "$LAN_PROXY_ENABLED" -eq 1 ] && rule "-I PREROUTING 1 -j $MGL_PRE_CTRL"
+		if [ "$LAN_PROXY_ENABLED" -eq 1 ] || { [ "$ROUTER_PROXY" -eq 1 ] && [ "$TPROXY_ACTIVE_V6" -eq 1 ]; }; then rule "-I PREROUTING 1 -j $MGL_PRE_CTRL"; fi
 		[ "$ROUTER_PROXY" -eq 1 ] && [ "$TUN_ACTIVE_V6" -eq 1 ] && rule "-I OUTPUT 1 -j $MGL_OUT_TUN"
 		[ "$ROUTER_PROXY" -eq 1 ] && [ "$TPROXY_ACTIVE_V6" -eq 1 ] && rule "-I OUTPUT 1 -j $MGL_OUT_MARK"
 		if mode_is "$IPV6_TCP_MODE" tproxy || mode_is "$IPV6_DNS_MODE" tproxy; then rule "-A $MGL_PRE_TPROXY -p tcp -j TPROXY --on-port $TPROXY_PORT --tproxy-mark $TPROXY_MARK/$TPROXY_MASK"; fi
@@ -662,8 +676,8 @@ load_config() {
 		config_get_bool old_dns4 proxy ipv4_dns_hijack 1; config_get_bool old_dns6 proxy ipv6_dns_hijack 0
 		[ "$old_v4" -eq 1 ] && IPV4_TCP_MODE="$old_tcp" || IPV4_TCP_MODE=disable
 		[ "$old_v4" -eq 1 ] && IPV4_UDP_MODE="$old_udp" || IPV4_UDP_MODE=disable
-		[ "$old_v6" -eq 1 ] && IPV6_TCP_MODE=tproxy || IPV6_TCP_MODE=disable
-		[ "$old_v6" -eq 1 ] && IPV6_UDP_MODE=tproxy || IPV6_UDP_MODE=disable
+		[ "$old_v6" -eq 1 ] && IPV6_TCP_MODE="$old_tcp" || IPV6_TCP_MODE=disable
+		[ "$old_v6" -eq 1 ] && IPV6_UDP_MODE="$old_udp" || IPV6_UDP_MODE=disable
 		[ "$old_dns4" -eq 1 ] && IPV4_DNS_MODE=redirect || IPV4_DNS_MODE=disable
 		[ "$old_dns6" -eq 1 ] && IPV6_DNS_MODE=redirect || IPV6_DNS_MODE=disable
 	fi
@@ -684,7 +698,7 @@ load_config() {
 
 	TPROXY_ACTIVE_V4=0; TPROXY_ACTIVE_V6=0; TUN_ACTIVE_V4=0; TUN_ACTIVE_V6=0
 	# Avoid shell &&/|| precedence ambiguity.
-	if mode_is "$IPV4_TCP_MODE" tproxy || mode_is "$IPV4_UDP_MODE" tproxy; then TPROXY_ACTIVE_V4=1; fi
+	if mode_is "$IPV4_TCP_MODE" tproxy || mode_is "$IPV4_UDP_MODE" tproxy || mode_is "$IPV4_DNS_MODE" tproxy; then TPROXY_ACTIVE_V4=1; fi
 	if mode_is "$IPV6_TCP_MODE" tproxy || mode_is "$IPV6_UDP_MODE" tproxy || mode_is "$IPV6_DNS_MODE" tproxy; then TPROXY_ACTIVE_V6=1; fi
 	if mode_is "$IPV4_TCP_MODE" tun || mode_is "$IPV4_UDP_MODE" tun || mode_is "$IPV4_DNS_MODE" tun; then TUN_ACTIVE_V4=1; fi
 	if mode_is "$IPV6_TCP_MODE" tun || mode_is "$IPV6_UDP_MODE" tun || mode_is "$IPV6_DNS_MODE" tun; then TUN_ACTIVE_V6=1; fi
@@ -701,9 +715,9 @@ family_enabled() {
 validate_modes() {
 	case "$IPV4_TCP_MODE" in disable|redirect|tproxy|tun) ;; *) return 1 ;; esac
 	case "$IPV4_UDP_MODE" in disable|tproxy|tun) ;; *) return 1 ;; esac
-	case "$IPV6_TCP_MODE" in disable|tproxy|tun) ;; *) return 1 ;; esac
+	case "$IPV6_TCP_MODE" in disable|redirect|tproxy|tun) ;; *) return 1 ;; esac
 	case "$IPV6_UDP_MODE" in disable|tproxy|tun) ;; *) return 1 ;; esac
-	case "$IPV4_DNS_MODE" in disable|redirect|tun) ;; *) return 1 ;; esac
+	case "$IPV4_DNS_MODE" in disable|redirect|tproxy|tun) ;; *) return 1 ;; esac
 	case "$IPV6_DNS_MODE" in disable|redirect|tproxy|tun) ;; *) return 1 ;; esac
 }
 
@@ -725,7 +739,7 @@ check_family_backend() {
 			"$cmd" -t mangle -j MARK -h >/dev/null 2>&1 || return 1
 		fi
 	else
-		if mode_is "$IPV6_DNS_MODE" redirect; then
+		if mode_is "$IPV6_TCP_MODE" redirect || mode_is "$IPV6_DNS_MODE" redirect; then
 			"$cmd" -t nat -j REDIRECT -h >/dev/null 2>&1 || return 1
 		fi
 		if [ "$TPROXY_ACTIVE_V6" -eq 1 ]; then

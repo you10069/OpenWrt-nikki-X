@@ -65,6 +65,7 @@ return view.extend({
         o = s.taboption('proxy', form.ListValue, 'ipv6_tcp_mode', _('IPv6 TCP Mode'));
         o.rmempty = false;
         o.value('disable', _('Disable'));
+        o.value('redirect', _('REDIRECT'));
         o.value('tproxy', _('TPROXY'));
         o.value('tun', _('TUN'));
 
@@ -74,10 +75,11 @@ return view.extend({
         o.value('tproxy', _('TPROXY'));
         o.value('tun', _('TUN'));
 
-        o = s.taboption('proxy', form.ListValue, 'ipv4_dns_mode', _('IPv4 DNS Mode'), _('REDIRECT TCP/UDP port 53 to the Mihomo DNS listener, or route it through TUN while preserving the original destination.'));
+        o = s.taboption('proxy', form.ListValue, 'ipv4_dns_mode', _('IPv4 DNS Mode'), _('REDIRECT TCP/UDP port 53 to the Mihomo DNS listener, TPROXY it to the Mihomo TPROXY listener, or route it through TUN while preserving the original destination.'));
         o.rmempty = false;
         o.value('disable', _('Disable'));
         o.value('redirect', _('REDIRECT to Mihomo DNS'));
+        o.value('tproxy', _('TPROXY'));
         o.value('tun', _('TUN'));
 
         o = s.taboption('proxy', form.ListValue, 'ipv6_dns_mode', _('IPv6 DNS Mode'), _('REDIRECT TCP/UDP port 53 to the dual-stack Mihomo DNS listener, TPROXY it to the Mihomo TPROXY listener, or route it through TUN while preserving the original destination.'));
