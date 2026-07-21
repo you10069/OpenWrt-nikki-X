@@ -632,40 +632,8 @@ extract_to_active() {
 	[ -s "$CORE_ACTIVE" ] || return 1
 }
 
-validate_elf_architecture() {
-	local path="$1" expected="$2" bytes class data low high machine
-	bytes="$(od -An -tu1 -N20 "$path" 2>/dev/null)" || return 1
-	set -- $bytes
-	[ "$1" = 127 ] && [ "$2" = 69 ] && [ "$3" = 76 ] && [ "$4" = 70 ] || return 1
-	class="$5"
-	data="$6"
-	low="${19}"
-	high="${20}"
-	case "$data" in
-		1) machine=$((low + high * 256)) ;;
-		2) machine=$((high + low * 256)) ;;
-		*) return 1 ;;
-	esac
-	case "$expected" in
-		386) [ "$machine" -eq 3 ] && [ "$class" -eq 1 ] ;;
-		amd64-compatible) [ "$machine" -eq 62 ] && [ "$class" -eq 2 ] ;;
-		armv5|armv6|armv7) [ "$machine" -eq 40 ] && [ "$class" -eq 1 ] ;;
-		arm64) [ "$machine" -eq 183 ] && [ "$class" -eq 2 ] ;;
-		mips-softfloat|mips-hardfloat) [ "$machine" -eq 8 ] && [ "$class" -eq 1 ] && [ "$data" -eq 2 ] ;;
-		mipsle-softfloat|mipsle-hardfloat) [ "$machine" -eq 8 ] && [ "$class" -eq 1 ] && [ "$data" -eq 1 ] ;;
-		mips64) [ "$machine" -eq 8 ] && [ "$class" -eq 2 ] && [ "$data" -eq 2 ] ;;
-		mips64le) [ "$machine" -eq 8 ] && [ "$class" -eq 2 ] && [ "$data" -eq 1 ] ;;
-		riscv64) [ "$machine" -eq 243 ] && [ "$class" -eq 2 ] ;;
-		loong64-abi2) [ "$machine" -eq 258 ] && [ "$class" -eq 2 ] ;;
-		ppc64le) [ "$machine" -eq 21 ] && [ "$class" -eq 2 ] && [ "$data" -eq 1 ] ;;
-		s390x) [ "$machine" -eq 22 ] && [ "$class" -eq 2 ] && [ "$data" -eq 2 ] ;;
-		*) return 1 ;;
-	esac
-}
-
 validate_installed_core() {
 	local version
-	validate_elf_architecture "$CORE_ACTIVE" "$EXPECTED_ARCH" || return 1
 	chmod 0755 "$CORE_ACTIVE" || return 1
 	version="$(core_version "$CORE_ACTIVE")"
 	[ -n "$version" ] || return 1
