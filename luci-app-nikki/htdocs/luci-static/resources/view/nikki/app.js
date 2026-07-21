@@ -338,7 +338,7 @@ return view.extend({
         o.rmempty = false;
 
         s = m.section(form.NamedSection, 'core_update', 'core_update', _('Core Update'));
-        s.description = E('span', { style: 'font-size:15px;line-height:1.7;' }, [_('After selecting an update source, be sure to click Save & Apply before checking for updates or updating the core!')]);
+        s.description = _('After selecting an update source, be sure to click Save & Apply before checking for updates or updating the core!');
 
         o = s.option(form.ListValue, 'source_type', _('Update Source Selection'));
         o.default = 'official';
@@ -409,13 +409,13 @@ return view.extend({
         o.cfgvalue = function () { return renderInfoValue(coreStatusText(coreInfo), true, 'core_update_status'); };
 
         o = s.option(form.DummyValue, '_check_update', _('Check Update'));
-        o.description = E('span', { style: 'font-size:14px;' }, [_('Be sure to click Save & Apply at the bottom right first!')]);
+        o.description = _('Be sure to click Save & Apply at the bottom right first!');
         o.cfgvalue = function () {
             return coreActionButton(_('Check Update'), 'action', function () { return runCheckAction(document); }, 'core_update_check_button');
         };
 
         o = s.option(form.DummyValue, '_update_core', _('Update Core'));
-        o.description = E('span', { style: 'font-size:14px;' }, [_('Be sure to click Save & Apply at the bottom right first!')]);
+        o.description = _('Be sure to click Save & Apply at the bottom right first!');
         o.cfgvalue = function () {
             return coreActionButton(_('Update Core'), 'positive', function () { return runUpdateAction(document); }, 'core_update_update_button');
         };

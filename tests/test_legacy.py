@@ -1699,6 +1699,8 @@ def test_rpc_firewall_backend_detection(tmp: Path) -> None:
 
 def test_frontend_backend_contracts() -> None:
     app_js = (ROOT / "luci-app-nikki/htdocs/luci-static/resources/view/nikki/app.js").read_text()
+    assert "s.description = _('After selecting an update source, be sure to click Save & Apply before checking for updates or updating the core!');" in app_js
+    assert "s.description = E('span'" not in app_js
     proxy_js = (ROOT / "luci-app-nikki/htdocs/luci-static/resources/view/nikki/proxy.js").read_text()
     mixin_js = (ROOT / "luci-app-nikki/htdocs/luci-static/resources/view/nikki/mixin.js").read_text()
     tools_js = (ROOT / "luci-app-nikki/htdocs/luci-static/resources/tools/nikki.js").read_text()
@@ -1756,6 +1758,8 @@ def test_frontend_backend_contracts() -> None:
     assert "Configuration changed" not in app_js
     assert "Configuration saved" not in app_js
     assert "ui.addNotification" not in app_js
+    assert app_js.count("o.description = _(\'Be sure to click Save & Apply at the bottom right first!\');") == 2
+    assert "font-size:14px" not in core_block
     assert "Confirm Core Deletion" in app_js
     assert "pollCoreOperation" in app_js
     assert "source_changed" in app_js
@@ -1925,7 +1929,7 @@ def test_static() -> None:
     assert "PKG_RELEASE:=7" in makefile
     luci_makefile = (ROOT / "luci-app-nikki/Makefile").read_text()
     assert "PKG_VERSION:=1.26.1-v6" in luci_makefile
-    assert "PKG_RELEASE:=6" in luci_makefile
+    assert "PKG_RELEASE:=8" in luci_makefile
     assert "Hooks/Prepare/Post += Prepare/SetNikkiRpcExecutable" in luci_makefile
     assert "chmod 0755 $(PKG_BUILD_DIR)/root/usr/libexec/nikki-rpc" in luci_makefile
     permission_fallback = (
@@ -1973,6 +1977,8 @@ def test_static() -> None:
     assert "Configuration changed" not in app_js
     assert "Configuration saved" not in app_js
     assert "ui.addNotification" not in app_js
+    assert app_js.count("o.description = _(\'Be sure to click Save & Apply at the bottom right first!\');") == 2
+    assert "font-size:14px" not in core_block
 
     zh_hans = (ROOT / "luci-app-nikki/po/zh_Hans/nikki.po").read_text()
     for translated in (
