@@ -1,9 +1,9 @@
 #!/bin/sh
 
 # Nikki-X single-slot Mihomo core updater for OpenWrt 21.02 / BusyBox ash.
-# A user-requested update downloads and validates the payload before replacing
-# the managed core whenever storage permits. In the low-space pre-delete path,
-# replacing the old core first remains unavoidable.
+# A user-requested update always replaces the managed core once the fixed
+# storage thresholds are met. Validation happens after replacement; a failed
+# validation removes the new core and leaves Nikki without a managed core.
 
 HOME_DIR="${HOME_DIR:-/etc/nikki}"
 CORE_DIR="${CORE_DIR:-/usr/libexec/nikki}"
@@ -22,9 +22,8 @@ USER_AGENT="nikki-core-updater"
 
 API_TIMEOUT=10
 PROBE_TIMEOUT=5
-NO_RESPONSE_TIMEOUT=20
-UPDATE_TASK_TIMEOUT=900
-DOWNLOAD_ATTEMPTS=3
+NO_RESPONSE_TIMEOUT=10
+UPDATE_TASK_TIMEOUT=300
 MIB_KB=1024
 
 SOURCE_TYPE=official
@@ -41,6 +40,7 @@ RESOLVED_REPOSITORY_BASE=
 RESOLVED_URL=
 RESOLVED_ASSET=
 LATEST_VERSION=
+EXPECTED_ARCH=
 ERROR_KIND=
 UPDATE_DEADLINE=0
 
@@ -340,29 +340,7 @@ fetch_official_release_json() {
 }
 
 probe_url() {
-	local url="$1" asset="${2:-}" probe bytes first second
-	probe="$TEMP_ROOT/nikki-core-probe.$$"
-	rm -f "$probe"
-	"$CURL_BIN" -fL --range 0-1 --connect-timeout "$PROBE_TIMEOUT" --max-time "$PROBE_TIMEOUT" --retry 0 -A "$USER_AGENT" -sS -o "$probe" "$url" 2>/dev/null || {
-		rm -f "$probe"
-		return 1
-	}
-	[ -s "$probe" ] || { rm -f "$probe"; return 1; }
-
-	case "$asset" in
-		*.tar.gz|*.tgz|*.gz)
-			bytes="$(od -An -tu1 -N2 "$probe" 2>/dev/null)" || { rm -f "$probe"; return 1; }
-			set -- $bytes
-			first="${1:-}"
-			second="${2:-}"
-			rm -f "$probe"
-			[ "$first" = 31 ] && [ "$second" = 139 ]
-			;;
-		*)
-			rm -f "$probe"
-			return 0
-			;;
-	esac
+	"$CURL_BIN" -fL --range 0-0 --connect-timeout "$PROBE_TIMEOUT" --max-time "$PROBE_TIMEOUT" --retry 0 -A "$USER_AGENT" -sS -o /dev/null "$1" 2>/dev/null
 }
 
 fetch_text_5s() {
@@ -376,12 +354,13 @@ resolve_official_source() {
 	fetch_official_release_json "$OFFICIAL_REPOSITORY" "$json_file" || { ERROR_KIND=network; return 1; }
 	tag="$("$YQ_BIN" -M -p json -r '.tag_name // ""' "$json_file" 2>/dev/null)"
 	arch="$(system_architecture)" || { ERROR_KIND=arch; return 1; }
+	EXPECTED_ARCH="$arch"
 	name="mihomo-linux-${arch}-${tag}.gz"
 	ASSET_NAME="$name" original="$(ASSET_NAME="$name" "$YQ_BIN" -M -p json -r '.assets[] | select(.name == env(ASSET_NAME)) | .browser_download_url' "$json_file" 2>/dev/null | head -n 1)"
 	[ -n "$original" ] && [ "$original" != null ] || { ERROR_KIND=arch; return 1; }
 	for channel in $(official_download_channels); do
 		candidate="$(official_asset_url "$channel" "$original")" || continue
-		if probe_url "$candidate" "$name"; then
+		if probe_url "$candidate"; then
 			LATEST_VERSION="$tag"
 			RESOLVED_ASSET="$name"
 			RESOLVED_URL="$candidate"
@@ -396,6 +375,7 @@ resolve_official_source() {
 resolve_repository_source() {
 	local arch name base text version candidate
 	arch="$(shellcrash_architecture)" || { ERROR_KIND=arch; return 1; }
+	EXPECTED_ARCH="$(system_architecture)" || { ERROR_KIND=arch; return 1; }
 	name="clash-linux-${arch}.tar.gz"
 	for base in $(repository_bases); do
 		text="$(fetch_text_5s "$(trim_slash "$base")/bin/version")" || continue
@@ -403,7 +383,7 @@ resolve_repository_source() {
 		[ -n "$version" ] || version="$(extract_version_token "$text")"
 		[ -n "$version" ] || continue
 		candidate="$(trim_slash "$base")/bin/meta/$name"
-		if probe_url "$candidate" "$name"; then
+		if probe_url "$candidate"; then
 			LATEST_VERSION="$version"
 			RESOLVED_ASSET="$name"
 			RESOLVED_URL="$candidate"
@@ -432,6 +412,7 @@ resolve_release_source() {
 	local base tag arch name path candidate
 	[ -n "$RELEASES_URL" ] || { ERROR_KIND=network; return 1; }
 	arch="$(system_architecture)" || { ERROR_KIND=arch; return 1; }
+	EXPECTED_ARCH="$arch"
 	base="$(trim_slash "$RELEASES_URL")"
 	tag="$(resolve_release_tag "$base" "$RELEASES_TAG")"
 	name="mihomo-linux-${arch}-${tag}.gz"
@@ -440,7 +421,7 @@ resolve_release_source() {
 		*) path="$tag/$name" ;;
 	esac
 	candidate="$base/$path"
-	probe_url "$candidate" "$name" || { ERROR_KIND=network; return 1; }
+	probe_url "$candidate" || { ERROR_KIND=network; return 1; }
 	LATEST_VERSION="$tag"
 	RESOLVED_ASSET="$name"
 	RESOLVED_URL="$candidate"
@@ -448,15 +429,14 @@ resolve_release_source() {
 }
 
 resolve_direct_source() {
-	local asset
 	[ -n "$DIRECT_URL" ] || { ERROR_KIND=network; return 1; }
-	asset="${DIRECT_URL%%\?*}"
-	asset="${asset##*/}"
-	probe_url "$DIRECT_URL" "$asset" || { ERROR_KIND=network; return 1; }
+	EXPECTED_ARCH="$(system_architecture)" || { ERROR_KIND=arch; return 1; }
+	probe_url "$DIRECT_URL" || { ERROR_KIND=network; return 1; }
 	LATEST_VERSION="$(extract_version_token "$DIRECT_URL")"
 	[ -n "$LATEST_VERSION" ] || LATEST_VERSION=unknown
 	RESOLVED_URL="$DIRECT_URL"
-	RESOLVED_ASSET="$asset"
+	RESOLVED_ASSET="${DIRECT_URL%%\?*}"
+	RESOLVED_ASSET="${RESOLVED_ASSET##*/}"
 	return 0
 }
 
@@ -466,6 +446,7 @@ resolve_source() {
 	RESOLVED_URL=
 	RESOLVED_ASSET=
 	LATEST_VERSION=
+	EXPECTED_ARCH=
 	ERROR_KIND=
 	case "$SOURCE_TYPE" in
 		official) resolve_official_source ;;
@@ -615,63 +596,17 @@ restart_service_checked() {
 }
 
 download_resolved() {
-	local output="$1" partial remaining attempt
-	partial="${output}.part"
-	cleanup_paths="$cleanup_paths $partial"
-	attempt=1
-	rm -f "$output" "$partial"
-	while [ "$attempt" -le "$DOWNLOAD_ATTEMPTS" ]; do
-		remaining="$(remaining_seconds)" || { rm -f "$partial"; return 1; }
-		if "$CURL_BIN" -fL \
-			--connect-timeout "$NO_RESPONSE_TIMEOUT" \
-			--speed-limit 1 --speed-time "$NO_RESPONSE_TIMEOUT" \
-			--max-time "$remaining" --retry 0 \
-			-A "$USER_AGENT" -sS -o "$partial" "$RESOLVED_URL" 2>/dev/null \
-			&& [ -s "$partial" ]; then
-			mv -f "$partial" "$output" || { rm -f "$partial"; return 1; }
-			return 0
-		fi
-		rm -f "$partial"
-		attempt=$((attempt + 1))
-		[ "$attempt" -le "$DOWNLOAD_ATTEMPTS" ] && sleep 2
-	done
-	return 1
-}
-
-detect_download_kind() {
-	local archive="$1" bytes first second
-	[ -s "$archive" ] || return 1
-
-	# A gzip-compressed tar archive must be checked before a plain .gz stream.
-	if tar -tzf "$archive" >/dev/null 2>&1; then
-		printf '%s' tar_gz
-		return 0
-	fi
-
-	bytes="$(od -An -tu1 -N2 "$archive" 2>/dev/null)" || return 1
-	set -- $bytes
-	first="${1:-}"
-	second="${2:-}"
-	if [ "$first" = 31 ] && [ "$second" = 139 ]; then
-		gzip -t "$archive" >/dev/null 2>&1 || return 1
-		printf '%s' gzip
-		return 0
-	fi
-
-	is_elf_file "$archive" || return 1
-	printf '%s' elf
-}
-
-validate_download_file() {
-	detect_download_kind "$1" >/dev/null
+	local output="$1" remaining
+	remaining="$(remaining_seconds)" || return 1
+	rm -f "$output"
+	"$CURL_BIN" -fL --connect-timeout "$NO_RESPONSE_TIMEOUT" --speed-limit 1 --speed-time "$NO_RESPONSE_TIMEOUT" --max-time "$remaining" --retry 0 -A "$USER_AGENT" -sS -o "$output" "$RESOLVED_URL" 2>/dev/null
 }
 
 extract_to_active() {
-	local archive="$1" asset="$2" kind list_file item selected fallback
-	kind="$(detect_download_kind "$archive")" || return 1
+	local archive="$1" asset="$2" list_file item selected fallback
 	rm -f "$CORE_ACTIVE" || return 1
-	case "$kind" in
-		tar_gz)
+	case "$asset" in
+		*.tar.gz|*.tgz)
 			list_file="$TEMP_ROOT/nikki-core-list.$$"
 			cleanup_paths="$cleanup_paths $list_file"
 			tar -tzf "$archive" > "$list_file" 2>/dev/null || return 1
@@ -687,27 +622,50 @@ extract_to_active() {
 			[ -n "$selected" ] || return 1
 			tar -xOzf "$archive" "$selected" > "$CORE_ACTIVE" 2>/dev/null || return 1
 			;;
-		gzip)
+		*.gz)
 			gzip -dc "$archive" > "$CORE_ACTIVE" 2>/dev/null || return 1
 			;;
-		elf)
+		*)
 			cp "$archive" "$CORE_ACTIVE" || return 1
 			;;
-		*) return 1 ;;
 	esac
 	[ -s "$CORE_ACTIVE" ] || return 1
 }
 
-is_elf_file() {
-	local path="$1" bytes
-	bytes="$(od -An -tu1 -N4 "$path" 2>/dev/null)" || return 1
+validate_elf_architecture() {
+	local path="$1" expected="$2" bytes class data low high machine
+	bytes="$(od -An -tu1 -N20 "$path" 2>/dev/null)" || return 1
 	set -- $bytes
-	[ "${1:-}" = 127 ] && [ "${2:-}" = 69 ] && [ "${3:-}" = 76 ] && [ "${4:-}" = 70 ]
+	[ "$1" = 127 ] && [ "$2" = 69 ] && [ "$3" = 76 ] && [ "$4" = 70 ] || return 1
+	class="$5"
+	data="$6"
+	low="${19}"
+	high="${20}"
+	case "$data" in
+		1) machine=$((low + high * 256)) ;;
+		2) machine=$((high + low * 256)) ;;
+		*) return 1 ;;
+	esac
+	case "$expected" in
+		386) [ "$machine" -eq 3 ] && [ "$class" -eq 1 ] ;;
+		amd64-compatible) [ "$machine" -eq 62 ] && [ "$class" -eq 2 ] ;;
+		armv5|armv6|armv7) [ "$machine" -eq 40 ] && [ "$class" -eq 1 ] ;;
+		arm64) [ "$machine" -eq 183 ] && [ "$class" -eq 2 ] ;;
+		mips-softfloat|mips-hardfloat) [ "$machine" -eq 8 ] && [ "$class" -eq 1 ] && [ "$data" -eq 2 ] ;;
+		mipsle-softfloat|mipsle-hardfloat) [ "$machine" -eq 8 ] && [ "$class" -eq 1 ] && [ "$data" -eq 1 ] ;;
+		mips64) [ "$machine" -eq 8 ] && [ "$class" -eq 2 ] && [ "$data" -eq 2 ] ;;
+		mips64le) [ "$machine" -eq 8 ] && [ "$class" -eq 2 ] && [ "$data" -eq 1 ] ;;
+		riscv64) [ "$machine" -eq 243 ] && [ "$class" -eq 2 ] ;;
+		loong64-abi2) [ "$machine" -eq 258 ] && [ "$class" -eq 2 ] ;;
+		ppc64le) [ "$machine" -eq 21 ] && [ "$class" -eq 2 ] && [ "$data" -eq 1 ] ;;
+		s390x) [ "$machine" -eq 22 ] && [ "$class" -eq 2 ] && [ "$data" -eq 2 ] ;;
+		*) return 1 ;;
+	esac
 }
 
 validate_installed_core() {
 	local version
-	[ -f "$CORE_ACTIVE" ] && [ -s "$CORE_ACTIVE" ] || return 1
+	validate_elf_architecture "$CORE_ACTIVE" "$EXPECTED_ARCH" || return 1
 	chmod 0755 "$CORE_ACTIVE" || return 1
 	version="$(core_version "$CORE_ACTIVE")"
 	[ -n "$version" ] || return 1
@@ -750,11 +708,6 @@ update_core_locked() {
 	if ! download_resolved "$archive"; then
 		rm -f "$archive"
 		fail '暂无法连接当前更新源，请重试几次或更换源'
-		return 1
-	fi
-	if ! validate_download_file "$archive" "$RESOLVED_ASSET"; then
-		rm -f "$archive"
-		fail '更新源返回的不是有效内核文件，请更换更新源后重试'
 		return 1
 	fi
 
