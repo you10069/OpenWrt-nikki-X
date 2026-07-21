@@ -1206,8 +1206,9 @@ cp "{download}" "$out"
     download.chmod(0o755)
     failed = subprocess.run(["/bin/sh", str(updater), "update"], text=True, capture_output=True, env=env)
     assert failed.returncode != 0
-    assert "下载的内核文件已损坏" in failed.stderr
-    assert not active.exists()
+    assert "更新源返回的不是有效内核文件" in failed.stderr
+    assert active.exists()
+    assert run([str(active), "-v"]).split()[2] == "v1.1.0"
 
     make_fake_core(active, "v1.0.0")
     run(["/bin/sh", str(updater), "delete-current"], env=env)
@@ -1229,7 +1230,7 @@ def test_official_source_channels(tmp: Path) -> None:
         "github": original_url,
     }
 
-    def run_case(name: str, preset: str, direct_api_ok: bool, success_channel: str):
+    def run_case(name: str, preset: str, direct_api_ok: bool, success_channel: str, html_channel: str = ""):
         runtime = tmp / f"official-{name}"
         bin_dir = runtime / "bin"
         core_dir = runtime / "core"
@@ -1278,6 +1279,8 @@ esac
         )
         direct_api_action = f'[ -n "$out" ] || exit 22; cp "{release_json}" "$out"' if direct_api_ok else "exit 28"
         success_url = channel_urls[success_channel]
+        html_url = channel_urls.get(html_channel, "")
+        html_case = f'{html_url}) [ -n "$out" ] || exit 22; printf "%s\n" "<!doctype html><title>proxy landing page</title>" > "$out" ;;' if html_url else ""
         write(
             bin_dir / "curl",
             f'''#!/bin/sh
@@ -1299,6 +1302,7 @@ printf '%s|%s|%s\n' "$max_time" "$range" "$url" >> "{curl_log}"
 case "$url" in
   {api_url}) {direct_api_action} ;;
   {proxy_api_url}) [ -n "$out" ] || exit 22; cp "{release_json}" "$out" ;;
+  {html_case}
   {success_url})
     [ "$out" = /dev/null ] && exit 0
     [ -n "$out" ] || exit 22
@@ -1328,13 +1332,13 @@ esac
         assert "source=MetaCubeX 官方最新发布" in state
         return curl_log.read_text().splitlines()
 
-    auto_calls = run_case("auto", "auto", False, "proxynet")
+    auto_calls = run_case("auto", "auto", False, "proxynet", "proxy")
     assert auto_calls[:4] == [
         f"10|0|{api_url}", f"10|0|{proxy_api_url}",
         f"5|1|{channel_urls['proxy']}", f"5|1|{channel_urls['proxynet']}",
     ]
     assert auto_calls[4].endswith(f"|0|{channel_urls['proxynet']}")
-    assert 1 <= int(auto_calls[4].split('|', 1)[0]) <= 300
+    assert 1 <= int(auto_calls[4].split('|', 1)[0]) <= 900
     assert f"5|1|{channel_urls["github"]}" not in auto_calls
 
     proxy_calls = run_case("proxy", "proxy", True, "proxy")
@@ -1549,6 +1553,27 @@ def test_core_archive_extraction(tmp: Path) -> None:
     run(["/bin/sh", str(helper), str(archive), "core.tar.gz"], env=env)
     assert output.read_bytes() == core.read_bytes()
 
+    # Content detection must win over a misleading URL/asset suffix.
+    gzip_stream = tmp / "download-endpoint"
+    make_gzip(core, gzip_stream)
+    run(["/bin/sh", str(helper), str(gzip_stream), "download"], env=env)
+    assert output.read_bytes() == core.read_bytes()
+
+    truncated = tmp / "truncated-download"
+    truncated.write_bytes(gzip_stream.read_bytes()[:-16])
+    rejected_truncated = subprocess.run(
+        ["/bin/sh", str(helper), str(truncated), "download"],
+        text=True,
+        capture_output=True,
+        env=env,
+    )
+    assert rejected_truncated.returncode != 0
+
+    misleading_tar = tmp / "asset.bin"
+    misleading_tar.write_bytes(archive.read_bytes())
+    run(["/bin/sh", str(helper), str(misleading_tar), "asset.bin"], env=env)
+    assert output.read_bytes() == core.read_bytes()
+
     malicious = tmp / "malicious.tar.gz"
     payload = b"malicious"
     with tarfile.open(malicious, "w:gz") as tf:
@@ -1699,8 +1724,6 @@ def test_rpc_firewall_backend_detection(tmp: Path) -> None:
 
 def test_frontend_backend_contracts() -> None:
     app_js = (ROOT / "luci-app-nikki/htdocs/luci-static/resources/view/nikki/app.js").read_text()
-    assert "s.description = _('After selecting an update source, be sure to click Save & Apply before checking for updates or updating the core!');" in app_js
-    assert "s.description = E('span'" not in app_js
     proxy_js = (ROOT / "luci-app-nikki/htdocs/luci-static/resources/view/nikki/proxy.js").read_text()
     mixin_js = (ROOT / "luci-app-nikki/htdocs/luci-static/resources/view/nikki/mixin.js").read_text()
     tools_js = (ROOT / "luci-app-nikki/htdocs/luci-static/resources/tools/nikki.js").read_text()
@@ -1758,8 +1781,6 @@ def test_frontend_backend_contracts() -> None:
     assert "Configuration changed" not in app_js
     assert "Configuration saved" not in app_js
     assert "ui.addNotification" not in app_js
-    assert app_js.count("o.description = _(\'Be sure to click Save & Apply at the bottom right first!\');") == 2
-    assert "font-size:14px" not in core_block
     assert "Confirm Core Deletion" in app_js
     assert "pollCoreOperation" in app_js
     assert "source_changed" in app_js
@@ -1862,9 +1883,11 @@ def test_static() -> None:
         assert official_source in updater_source
     assert 'API_TIMEOUT=10' in updater_source
     assert 'PROBE_TIMEOUT=5' in updater_source
-    assert 'UPDATE_TASK_TIMEOUT=300' in updater_source
+    assert 'UPDATE_TASK_TIMEOUT=900' in updater_source
     assert 'timeout -s TERM "$UPDATE_TASK_TIMEOUT" "$0" update-worker' in updater_source
-    assert 'validate_elf_architecture "$CORE_ACTIVE" "$EXPECTED_ARCH"' in updater_source
+    assert 'validate_elf_architecture' not in updater_source
+    assert 'EXPECTED_ARCH' not in updater_source
+    assert 'is_elf_file "$archive"' in updater_source
     assert 'rm -f "$CORE_ACTIVE"' in updater_source
     assert 'CORE_PREVIOUS' not in (ROOT / "nikki/files/scripts/include.sh").read_text()
     assert 'mihomo-linux-${arch}-${tag}.gz' in updater_source
@@ -1925,11 +1948,10 @@ def test_static() -> None:
     assert "tun_fw_mark" in init
     assert ".auto-route = false" in init
     assert ".auto-redirect = false" in init
-    assert "PKG_VERSION:=2026.07.18-v6" in makefile
-    assert "PKG_RELEASE:=7" in makefile
+    assert "PKG_VERSION:=2026.07.21-v1" in makefile
+    assert "PKG_RELEASE:=1" in makefile
     luci_makefile = (ROOT / "luci-app-nikki/Makefile").read_text()
-    assert "PKG_VERSION:=1.26.1-v6" in luci_makefile
-    assert "PKG_RELEASE:=8" in luci_makefile
+    assert "PKG_VERSION:=1.26.1-v7-1" in luci_makefile
     assert "Hooks/Prepare/Post += Prepare/SetNikkiRpcExecutable" in luci_makefile
     assert "chmod 0755 $(PKG_BUILD_DIR)/root/usr/libexec/nikki-rpc" in luci_makefile
     permission_fallback = (
@@ -1977,8 +1999,6 @@ def test_static() -> None:
     assert "Configuration changed" not in app_js
     assert "Configuration saved" not in app_js
     assert "ui.addNotification" not in app_js
-    assert app_js.count("o.description = _(\'Be sure to click Save & Apply at the bottom right first!\');") == 2
-    assert "font-size:14px" not in core_block
 
     zh_hans = (ROOT / "luci-app-nikki/po/zh_Hans/nikki.po").read_text()
     for translated in (
