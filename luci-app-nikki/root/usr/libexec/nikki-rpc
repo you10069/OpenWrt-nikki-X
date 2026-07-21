@@ -109,7 +109,8 @@ core_action() {
 }
 
 profile() {
-	local defaults="${1:-{}}" defaults_file="$TMP_DIR/profile-defaults.$$"
+	local defaults="${1:-}" defaults_file="$TMP_DIR/profile-defaults.$$"
+	[ -n "$defaults" ] || defaults='{}'
 	mkdir -p "$TMP_DIR"
 	[ -r "$RUN_PROFILE" ] || { printf '{}\n'; return 0; }
 	trap 'rm -f "$defaults_file"' EXIT INT TERM
